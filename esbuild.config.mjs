@@ -5,13 +5,29 @@ const presets = createPluginBundlerPresets({ uiEntry: "src/ui/index.tsx" });
 const watch = process.argv.includes("--watch");
 
 const workerCtx = await esbuild.context(presets.esbuild.worker);
-const manifestCtx = await esbuild.context(presets.esbuild.manifest);
+const { outdir: _manifestOutdir, ...manifestBase } = presets.esbuild.manifest;
+const manifestCtx = await esbuild.context({
+  ...manifestBase,
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  entryPoints: ["src/manifest.ts"],
+  outfile: "dist/manifest.js",
+});
+const constantsCtx = await esbuild.context({
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  sourcemap: true,
+  entryPoints: ["src/constants.ts"],
+  outfile: "dist/constants.js",
+});
 const uiCtx = await esbuild.context(presets.esbuild.ui);
 
 if (watch) {
-  await Promise.all([workerCtx.watch(), manifestCtx.watch(), uiCtx.watch()]);
-  console.log("esbuild watch mode enabled for worker, manifest, and ui");
+  await Promise.all([workerCtx.watch(), manifestCtx.watch(), constantsCtx.watch(), uiCtx.watch()]);
+  console.log("esbuild watch mode enabled for worker, manifest, constants, and ui");
 } else {
-  await Promise.all([workerCtx.rebuild(), manifestCtx.rebuild(), uiCtx.rebuild()]);
-  await Promise.all([workerCtx.dispose(), manifestCtx.dispose(), uiCtx.dispose()]);
+  await Promise.all([workerCtx.rebuild(), manifestCtx.rebuild(), constantsCtx.rebuild(), uiCtx.rebuild()]);
+  await Promise.all([workerCtx.dispose(), manifestCtx.dispose(), constantsCtx.dispose(), uiCtx.dispose()]);
 }
