@@ -1,0 +1,58 @@
+{
+  "name": "@honcho-ai/paperclip-honcho",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Honcho memory integration for Paperclip",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plastic-labs/paperclip-honcho.git"
+  },
+  "homepage": "https://github.com/plastic-labs/paperclip-honcho#readme",
+  "bugs": {
+    "url": "https://github.com/plastic-labs/paperclip-honcho/issues"
+  },
+  "scripts": {
+    "build": "node ./esbuild.config.mjs",
+    "dev": "node ./esbuild.config.mjs --watch",
+    "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4178",
+    "test": "vitest run --config ./vitest.config.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "package.json"
+  ],
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "honcho",
+    "memory"
+  ],
+  "author": "Plastic Labs",
+  "license": "MIT",
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "^2026.325.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/react": "^19.0.8",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  }
+}
