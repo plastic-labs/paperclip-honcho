@@ -1,7 +1,78 @@
-import { DEFAULT_CONFIG, JOB_KEYS, ACTION_KEYS, DATA_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES } from "./constants.js";
-const PLUGIN_ID = "honcho-ai.paperclip-honcho";
-const PLUGIN_VERSION = "0.1.0";
-const manifest = {
+// src/constants.ts
+var DEFAULT_WORKSPACE_PREFIX = "paperclip";
+var HONCHO_V3_PATH = "/v3";
+var HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
+var DEFAULT_MAX_WORKSPACE_FILE_BYTES = 64 * 1024;
+var SLOT_IDS = {
+  settingsPage: "honcho-settings-page",
+  issueTab: "honcho-issue-memory-tab"
+};
+var EXPORT_NAMES = {
+  settingsPage: "HonchoSettingsPage",
+  issueTab: "HonchoIssueMemoryTab",
+  toolbarButton: "HonchoMemoryToolbarLauncher"
+};
+var DATA_KEYS = {
+  memoryStatus: "memory-status",
+  migrationPreview: "migration-preview",
+  migrationJobStatus: "migration-job-status",
+  issueStatus: "issue-memory-status"
+};
+var ACTION_KEYS = {
+  testConnection: "test-connection",
+  probePromptContext: "probe-prompt-context",
+  repairMappings: "repair-mappings",
+  resyncIssue: "resync-issue"
+};
+var JOB_KEYS = {
+  initializeMemory: "initialize-memory",
+  migrationScan: "migration-scan",
+  migrationImport: "migration-import"
+};
+var TOOL_NAMES = {
+  getIssueContext: "honcho_get_issue_context",
+  searchMemory: "honcho_search_memory",
+  askPeer: "honcho_ask_peer",
+  getWorkspaceContext: "honcho_get_workspace_context",
+  searchMessages: "honcho_search_messages",
+  searchConclusions: "honcho_search_conclusions",
+  getSession: "honcho_get_session",
+  getAgentContext: "honcho_get_agent_context",
+  getHierarchyContext: "honcho_get_hierarchy_context"
+};
+var RUNTIME_LAUNCHERS = [
+  {
+    id: "honcho-memory-launcher",
+    displayName: "Honcho Memory",
+    placementZone: "globalToolbarButton",
+    action: {
+      type: "openDrawer",
+      target: EXPORT_NAMES.toolbarButton
+    },
+    render: {
+      environment: "hostOverlay"
+    }
+  }
+];
+var DEFAULT_CONFIG = {
+  honchoApiBaseUrl: "https://api.honcho.dev",
+  honchoApiKeySecretRef: "",
+  workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
+  syncIssueComments: true,
+  syncIssueDocuments: true,
+  enablePromptContext: false,
+  enablePeerChat: true,
+  observeAgentPeers: false,
+  noisePatterns: [],
+  disableDefaultNoisePatterns: false,
+  stripPlatformMetadata: true,
+  flushBeforeReset: false
+};
+
+// src/manifest.ts
+var PLUGIN_ID = "honcho-ai.paperclip-honcho";
+var PLUGIN_VERSION = "0.1.0";
+var manifest = {
   id: PLUGIN_ID,
   apiVersion: 1,
   version: PLUGIN_VERSION,
@@ -96,7 +167,7 @@ const manifest = {
     }
   },
   entrypoints: {
-    worker: "./dist/worker.js",
+    worker: "./dist/worker-bootstrap.js",
     ui: "./dist/ui"
   },
   jobs: [
@@ -266,9 +337,9 @@ const manifest = {
     ]
   }
 };
-const HONCHO_DATA_KEYS = DATA_KEYS;
-const HONCHO_ACTION_KEYS = ACTION_KEYS;
-const HONCHO_JOB_KEYS = JOB_KEYS;
+var HONCHO_DATA_KEYS = DATA_KEYS;
+var HONCHO_ACTION_KEYS = ACTION_KEYS;
+var HONCHO_JOB_KEYS = JOB_KEYS;
 var manifest_default = manifest;
 export {
   HONCHO_ACTION_KEYS,
