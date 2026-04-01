@@ -99,7 +99,7 @@ const manifest: PaperclipPluginManifestV1 = {
     },
   },
   entrypoints: {
-    worker: "./dist/worker.js",
+    worker: "./dist/worker-bootstrap.js",
     ui: "./dist/ui",
   },
   jobs: [
