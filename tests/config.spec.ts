@@ -65,7 +65,7 @@ describe("honcho config", () => {
     expect(resolved.syncIssueDocuments).toBe(true);
     expect(resolved.enablePromptContext).toBe(false);
     expect(resolved.enablePeerChat).toBe(true);
-    expect(resolved.observeAgentPeers).toBe(false);
+    expect(resolved.observeAgentPeers).toBe(true);
     expect(resolved.noisePatterns).toEqual(["test"]);
     expect(resolved.disableDefaultNoisePatterns).toBe(false);
     expect(resolved.stripPlatformMetadata).toBe(true);

@@ -66,7 +66,7 @@ describe("honcho tools", () => {
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
       configuration: {
-        observe_me: false,
+        observe_me: true,
         observe_others: true,
       },
     });

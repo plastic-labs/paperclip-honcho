@@ -132,7 +132,7 @@ export const DEFAULT_CONFIG = {
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeAgentPeers: false,
+  observeAgentPeers: true,
   noisePatterns: [] as string[],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
