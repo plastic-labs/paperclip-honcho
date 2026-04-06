@@ -67,6 +67,7 @@ describe("honcho tools", () => {
     expect(peerRequest?.body).toMatchObject({
       configuration: {
         observe_me: false,
+        observe_others: true,
       },
     });
     expect(representationRequest?.body).not.toHaveProperty("session_id");
@@ -94,6 +95,7 @@ describe("honcho tools", () => {
     expect(peerRequest?.body).toMatchObject({
       configuration: {
         observe_me: true,
+        observe_others: true,
       },
     });
   });

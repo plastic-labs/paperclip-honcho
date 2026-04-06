@@ -7439,7 +7439,8 @@ var HonchoClient = class {
         agent_title: agent.title
       },
       {
-        observe_me: this.config.observeAgentPeers
+        observe_me: this.config.observeAgentPeers,
+        observe_others: true
       }
     );
   }
@@ -7600,7 +7601,8 @@ var HonchoClient = class {
         company_id: companyId,
         agent_id: agentId
       }, {
-        observe_me: this.config.observeAgentPeers
+        observe_me: this.config.observeAgentPeers,
+        observe_others: true
       });
     }
     const workspaceId = this.workspaceId(companyId);
