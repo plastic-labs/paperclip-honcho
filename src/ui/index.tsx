@@ -96,7 +96,8 @@ type SettingsConfig = {
   syncIssueDocuments: boolean;
   enablePromptContext: boolean;
   enablePeerChat: boolean;
-  observeAgentPeers: boolean;
+  observeMe: boolean;
+  observeOthers: boolean;
   noisePatterns: string[];
   disableDefaultNoisePatterns: boolean;
   stripPlatformMetadata: boolean;
@@ -149,7 +150,16 @@ function normalizeSettingsConfig(configJson: Record<string, unknown> | null | un
     syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
     enablePromptContext: typeof source.enablePromptContext === "boolean" ? source.enablePromptContext : DEFAULT_CONFIG.enablePromptContext,
     enablePeerChat: typeof source.enablePeerChat === "boolean" ? source.enablePeerChat : DEFAULT_CONFIG.enablePeerChat,
-    observeAgentPeers: typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeAgentPeers,
+    observeMe: typeof source.observeMe === "boolean"
+      ? source.observeMe
+      : typeof source.observeAgentPeers === "boolean"
+        ? source.observeAgentPeers
+        : DEFAULT_CONFIG.observeMe,
+    observeOthers: typeof source.observeOthers === "boolean"
+      ? source.observeOthers
+      : typeof source.observeAgentPeers === "boolean"
+        ? source.observeAgentPeers
+        : DEFAULT_CONFIG.observeOthers,
     noisePatterns: Array.isArray(source.noisePatterns) ? source.noisePatterns.filter((value): value is string => typeof value === "string") : [...DEFAULT_CONFIG.noisePatterns],
     disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
     stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
@@ -472,7 +482,8 @@ function SyncProfileSection(props: {
           ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
           ["Inject Honcho prompt context", props.config.enablePromptContext, "enablePromptContext"],
           ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
-          ["Allow Honcho to observe agent peers", props.config.observeAgentPeers, "observeAgentPeers"],
+          ["Observe me", props.config.observeMe, "observeMe"],
+          ["Observe others", props.config.observeOthers, "observeOthers"],
         ].map(([label, checked, key]) => (
           <label key={String(key)} style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
             <input

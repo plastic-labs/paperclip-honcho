@@ -259,7 +259,8 @@ export class HonchoClient {
         agent_title: agent.title,
       },
       {
-        observe_me: this.config.observeAgentPeers,
+        observe_me: this.config.observeMe,
+        observe_others: this.config.observeOthers,
       },
     );
   }
@@ -451,7 +452,8 @@ export class HonchoClient {
         company_id: companyId,
         agent_id: agentId,
       }, {
-        observe_me: this.config.observeAgentPeers,
+        observe_me: this.config.observeMe,
+        observe_others: this.config.observeOthers,
       });
     }
     const workspaceId = this.workspaceId(companyId);

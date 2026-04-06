@@ -66,7 +66,8 @@ describe("honcho tools", () => {
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
       configuration: {
-        observe_me: false,
+        observe_me: true,
+        observe_others: true,
       },
     });
     expect(representationRequest?.body).not.toHaveProperty("session_id");
@@ -77,7 +78,8 @@ describe("honcho tools", () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
-        observeAgentPeers: true,
+        observeMe: true,
+        observeOthers: true,
       },
     });
 
@@ -94,6 +96,7 @@ describe("honcho tools", () => {
     expect(peerRequest?.body).toMatchObject({
       configuration: {
         observe_me: true,
+        observe_others: true,
       },
     });
   });
