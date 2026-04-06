@@ -15,6 +15,8 @@ export type HonchoPluginConfig = {
   syncIssueDocuments?: boolean;
   enablePromptContext?: boolean;
   enablePeerChat?: boolean;
+  observeMe?: boolean;
+  observeOthers?: boolean;
   observeAgentPeers?: boolean;
   noisePatterns?: string[];
   disableDefaultNoisePatterns?: boolean;
@@ -30,7 +32,8 @@ export type HonchoResolvedConfig = {
   syncIssueDocuments: boolean;
   enablePromptContext: boolean;
   enablePeerChat: boolean;
-  observeAgentPeers: boolean;
+  observeMe: boolean;
+  observeOthers: boolean;
   noisePatterns: string[];
   disableDefaultNoisePatterns: boolean;
   stripPlatformMetadata: boolean;
@@ -282,7 +285,8 @@ export type IssueMemoryStatusData = {
     syncIssueDocuments: boolean;
     enablePromptContext: boolean;
     enablePeerChat: boolean;
-    observeAgentPeers: boolean;
+    observeMe: boolean;
+    observeOthers: boolean;
   };
 };
 
@@ -302,7 +306,8 @@ export type MemoryStatusData = {
     syncIssueDocuments: boolean;
     enablePromptContext: boolean;
     enablePeerChat: boolean;
-    observeAgentPeers: boolean;
+    observeMe: boolean;
+    observeOthers: boolean;
   };
   validation: {
     ok: boolean;

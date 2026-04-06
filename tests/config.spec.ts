@@ -48,6 +48,8 @@ describe("honcho config", () => {
         syncIssueDocuments: true,
         enablePromptContext: "yep",
         enablePeerChat: "nope",
+        observeMe: "nope",
+        observeOthers: "nope",
         observeAgentPeers: "nope",
         noisePatterns: ["test"],
         disableDefaultNoisePatterns: "nope",
@@ -65,7 +67,8 @@ describe("honcho config", () => {
     expect(resolved.syncIssueDocuments).toBe(true);
     expect(resolved.enablePromptContext).toBe(false);
     expect(resolved.enablePeerChat).toBe(true);
-    expect(resolved.observeAgentPeers).toBe(true);
+    expect(resolved.observeMe).toBe(true);
+    expect(resolved.observeOthers).toBe(true);
     expect(resolved.noisePatterns).toEqual(["test"]);
     expect(resolved.disableDefaultNoisePatterns).toBe(false);
     expect(resolved.stripPlatformMetadata).toBe(true);

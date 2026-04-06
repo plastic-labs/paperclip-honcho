@@ -6845,7 +6845,8 @@ var DEFAULT_CONFIG = {
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeAgentPeers: true,
+  observeMe: true,
+  observeOthers: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
@@ -6924,10 +6925,15 @@ var manifest = {
         title: "Enable Peer Chat Tool",
         default: DEFAULT_CONFIG.enablePeerChat
       },
-      observeAgentPeers: {
+      observeMe: {
         type: "boolean",
-        title: "Allow Honcho To Observe Agent Peers",
-        default: DEFAULT_CONFIG.observeAgentPeers
+        title: "Observe Me",
+        default: DEFAULT_CONFIG.observeMe
+      },
+      observeOthers: {
+        type: "boolean",
+        title: "Observe Others",
+        default: DEFAULT_CONFIG.observeOthers
       },
       noisePatterns: {
         type: "array",
@@ -7138,6 +7144,7 @@ function normalizeStringArray(value, fallback) {
 }
 function resolveConfig(config) {
   const input = config ?? {};
+  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeMe);
   return {
     honchoApiBaseUrl: normalizeString(input.honchoApiBaseUrl, DEFAULT_CONFIG.honchoApiBaseUrl) || DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKeySecretRef: normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKeySecretRef),
@@ -7146,7 +7153,8 @@ function resolveConfig(config) {
     syncIssueDocuments: normalizeBoolean(input.syncIssueDocuments, DEFAULT_CONFIG.syncIssueDocuments),
     enablePromptContext: normalizeBoolean(input.enablePromptContext, DEFAULT_CONFIG.enablePromptContext),
     enablePeerChat: normalizeBoolean(input.enablePeerChat, DEFAULT_CONFIG.enablePeerChat),
-    observeAgentPeers: normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeAgentPeers),
+    observeMe: typeof input.observeMe === "boolean" ? input.observeMe : legacyObserveAgentPeers,
+    observeOthers: typeof input.observeOthers === "boolean" ? input.observeOthers : legacyObserveAgentPeers,
     noisePatterns: normalizeStringArray(input.noisePatterns, DEFAULT_CONFIG.noisePatterns),
     disableDefaultNoisePatterns: normalizeBoolean(input.disableDefaultNoisePatterns, DEFAULT_CONFIG.disableDefaultNoisePatterns),
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),
@@ -7439,8 +7447,8 @@ var HonchoClient = class {
         agent_title: agent.title
       },
       {
-        observe_me: this.config.observeAgentPeers,
-        observe_others: true
+        observe_me: this.config.observeMe,
+        observe_others: this.config.observeOthers
       }
     );
   }
@@ -7601,8 +7609,8 @@ var HonchoClient = class {
         company_id: companyId,
         agent_id: agentId
       }, {
-        observe_me: this.config.observeAgentPeers,
-        observe_others: true
+        observe_me: this.config.observeMe,
+        observe_others: this.config.observeOthers
       });
     }
     const workspaceId = this.workspaceId(companyId);
@@ -8993,7 +9001,8 @@ async function loadIssueStatusData(ctx, issueId, companyId) {
       syncIssueDocuments: config.syncIssueDocuments,
       enablePromptContext: config.enablePromptContext,
       enablePeerChat: config.enablePeerChat,
-      observeAgentPeers: config.observeAgentPeers
+      observeMe: config.observeMe,
+      observeOthers: config.observeOthers
     }
   };
 }

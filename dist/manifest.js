@@ -62,7 +62,8 @@ var DEFAULT_CONFIG = {
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeAgentPeers: true,
+  observeMe: true,
+  observeOthers: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
@@ -138,10 +139,15 @@ var manifest = {
         title: "Enable Peer Chat Tool",
         default: DEFAULT_CONFIG.enablePeerChat
       },
-      observeAgentPeers: {
+      observeMe: {
         type: "boolean",
-        title: "Allow Honcho To Observe Agent Peers",
-        default: DEFAULT_CONFIG.observeAgentPeers
+        title: "Observe Me",
+        default: DEFAULT_CONFIG.observeMe
+      },
+      observeOthers: {
+        type: "boolean",
+        title: "Observe Others",
+        default: DEFAULT_CONFIG.observeOthers
       },
       noisePatterns: {
         type: "array",

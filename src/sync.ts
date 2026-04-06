@@ -1123,7 +1123,8 @@ export async function loadIssueStatusData(ctx: PluginContext, issueId: string, c
       syncIssueDocuments: config.syncIssueDocuments,
       enablePromptContext: config.enablePromptContext,
       enablePeerChat: config.enablePeerChat,
-      observeAgentPeers: config.observeAgentPeers,
+      observeMe: config.observeMe,
+      observeOthers: config.observeOthers,
     },
   };
 }

@@ -19,6 +19,7 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
 
 export function resolveConfig(config: HonchoPluginConfig | Record<string, unknown> | null | undefined): HonchoResolvedConfig {
   const input = (config ?? {}) as HonchoPluginConfig;
+  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeMe);
   return {
     honchoApiBaseUrl: normalizeString(input.honchoApiBaseUrl, DEFAULT_CONFIG.honchoApiBaseUrl) || DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKeySecretRef: normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKeySecretRef),
@@ -27,7 +28,8 @@ export function resolveConfig(config: HonchoPluginConfig | Record<string, unknow
     syncIssueDocuments: normalizeBoolean(input.syncIssueDocuments, DEFAULT_CONFIG.syncIssueDocuments),
     enablePromptContext: normalizeBoolean(input.enablePromptContext, DEFAULT_CONFIG.enablePromptContext),
     enablePeerChat: normalizeBoolean(input.enablePeerChat, DEFAULT_CONFIG.enablePeerChat),
-    observeAgentPeers: normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeAgentPeers),
+    observeMe: typeof input.observeMe === "boolean" ? input.observeMe : legacyObserveAgentPeers,
+    observeOthers: typeof input.observeOthers === "boolean" ? input.observeOthers : legacyObserveAgentPeers,
     noisePatterns: normalizeStringArray(input.noisePatterns, DEFAULT_CONFIG.noisePatterns),
     disableDefaultNoisePatterns: normalizeBoolean(input.disableDefaultNoisePatterns, DEFAULT_CONFIG.disableDefaultNoisePatterns),
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),

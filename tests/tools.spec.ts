@@ -78,7 +78,8 @@ describe("honcho tools", () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
-        observeAgentPeers: true,
+        observeMe: true,
+        observeOthers: true,
       },
     });
 
