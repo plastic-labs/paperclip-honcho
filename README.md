@@ -125,7 +125,8 @@ Recommended starting configuration:
 - `syncIssueDocuments: true`
 - `enablePromptContext: false`
 - `enablePeerChat: true`
-- `observeAgentPeers: false`
+- `observeMe: true`
+- `observeOthers: true`
 
 ## Notes
 
