@@ -357,7 +357,7 @@ function SecretSection(props) {
       )
     ] }),
     /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: "0.65rem", flexWrap: "wrap" }, children: [
-      /* @__PURE__ */ jsx("button", { style: mutedButtonStyle, onClick: () => void refresh(), disabled: loading, children: "Refresh secrets" }),
+      /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void refresh(), disabled: loading, children: "Refresh secrets" }),
       /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => setDraftOpen((value) => !value), children: draftOpen ? "Hide secret form" : "Create secret" })
     ] }),
     draftOpen ? /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.75rem" }, children: [
@@ -423,13 +423,12 @@ function SyncProfileSection(props) {
   return /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
     /* @__PURE__ */ jsxs("div", { children: [
       /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Recommended sync profile" }),
-      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "The public-host-compatible package syncs issue comments and issue documents, then serves Honcho memory primarily through tools and manual prompt previews." })
+      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "The public-host-compatible package syncs issue comments and issue documents, then serves Honcho memory through tool-first workflows." })
     ] }),
     /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => props.onConfigChange(recommended), children: "Apply recommended profile" }),
     /* @__PURE__ */ jsx("div", { style: { display: "grid", gap: "0.55rem" }, children: [
       ["Sync issue comments", props.config.syncIssueComments, "syncIssueComments"],
       ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
-      ["Inject Honcho prompt context", props.config.enablePromptContext, "enablePromptContext"],
       ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
       ["Observe me", props.config.observeMe, "observeMe"],
       ["Observe others", props.config.observeOthers, "observeOthers"]
@@ -496,10 +495,10 @@ function HonchoSettingsPage({ context }) {
   const preview = usePluginData(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
-  const probePromptContext = usePluginAction(ACTION_KEYS.probePromptContext);
   const repairMappings = usePluginAction(ACTION_KEYS.repairMappings);
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedActionKey, setSelectedActionKey] = useState(null);
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
   const canInitialize = Boolean(companyId && settings.configJson.honchoApiKeySecretRef);
@@ -528,17 +527,92 @@ function HonchoSettingsPage({ context }) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     }
   }
+  const actions = [
+    {
+      key: "save-settings",
+      label: "Save settings",
+      group: "core",
+      disabled: settings.loading || settings.saving,
+      run: saveSettings
+    },
+    {
+      key: "validate-config",
+      label: "Validate config",
+      group: "core",
+      disabled: settings.loading,
+      run: runValidation
+    },
+    {
+      key: "test-connection",
+      label: "Test connection",
+      group: "core",
+      disabled: !canInitialize,
+      run: async () => {
+        setError(null);
+        setNotice(null);
+        await testConnection({});
+      }
+    },
+    {
+      key: "initialize-memory",
+      label: "Initialize memory for this company",
+      group: "core",
+      disabled: !canInitialize || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.initializeMemory);
+      }
+    },
+    {
+      key: "migration-scan",
+      label: "Rescan migration sources",
+      group: "advanced",
+      disabled: !companyId || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.migrationScan);
+      }
+    },
+    {
+      key: "migration-import",
+      label: "Import history",
+      group: "advanced",
+      disabled: !companyId || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.migrationImport);
+      }
+    },
+    {
+      key: "repair-mappings",
+      label: "Repair mappings",
+      group: "advanced",
+      disabled: !companyId,
+      run: async () => {
+        if (!companyId) return;
+        try {
+          setError(null);
+          setNotice(null);
+          await repairMappings({ companyId });
+          setNotice("Mappings repaired.");
+          memoryStatus.refresh();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
+        }
+      }
+    }
+  ];
+  const groupedActions = [
+    { key: "core", label: "Core actions", actions: actions.filter((action) => action.group === "core") },
+    { key: "advanced", label: "Advanced actions", actions: actions.filter((action) => action.group === "advanced") }
+  ];
   return /* @__PURE__ */ jsxs("div", { style: sectionStyle, children: [
     /* @__PURE__ */ jsxs("div", { style: heroStyle, children: [
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.4rem" }, children: [
         /* @__PURE__ */ jsx("div", { style: { fontSize: "1.35rem", fontWeight: 700 }, children: "Honcho Memory Activation" }),
-        /* @__PURE__ */ jsx("div", { style: { color: "#475569", maxWidth: "70ch" }, children: "Connect Honcho, initialize memory for this company, import issue comments and issue documents, and use Honcho through tools and manual prompt previews without leaving Paperclip." })
+        /* @__PURE__ */ jsx("div", { style: { color: "#475569", maxWidth: "70ch" }, children: "Connect Honcho, initialize memory for this company, and import issue comments and issue documents without leaving Paperclip." })
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: "0.5rem", flexWrap: "wrap" }, children: [
         /* @__PURE__ */ jsx(StatusPill, { label: `Connection: ${companyStatus?.connectionStatus ?? "unknown"}`, tone: countTone(companyStatus?.connectionStatus) }),
         /* @__PURE__ */ jsx(StatusPill, { label: `Initialization: ${companyStatus?.initializationStatus ?? "not_started"}`, tone: countTone(companyStatus?.initializationStatus) }),
-        /* @__PURE__ */ jsx(StatusPill, { label: `Migration: ${companyStatus?.migrationStatus ?? "not_started"}`, tone: countTone(companyStatus?.migrationStatus) }),
-        /* @__PURE__ */ jsx(StatusPill, { label: `Prompt context: ${companyStatus?.promptContextStatus ?? "inactive"}`, tone: countTone(companyStatus?.promptContextStatus) })
+        /* @__PURE__ */ jsx(StatusPill, { label: `Migration: ${companyStatus?.migrationStatus ?? "not_started"}`, tone: countTone(companyStatus?.migrationStatus) })
       ] })
     ] }),
     /* @__PURE__ */ jsx(
@@ -571,7 +645,7 @@ function HonchoSettingsPage({ context }) {
         Row,
         {
           label: "Compatibility mode",
-          value: "Tool-first memory is active. Automatic prompt injection, run transcript import, and legacy workspace file import require a newer Paperclip host."
+          value: "Tool-first memory is active. Run transcript import and legacy workspace file import require a newer Paperclip host."
         }
       ),
       companyStatus?.lastError ? /* @__PURE__ */ jsx("div", { style: { color: "#b91c1c" }, children: companyStatus.lastError.message }) : null
@@ -587,53 +661,25 @@ function HonchoSettingsPage({ context }) {
     ] }),
     /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
       /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Actions" }),
-      /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: "0.65rem", flexWrap: "wrap" }, children: [
-        /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void saveSettings(), disabled: settings.loading || settings.saving, children: "Save settings" }),
-        /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void runValidation(), disabled: settings.loading, children: "Validate config" }),
-        /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void testConnection({}), disabled: !canInitialize, children: "Test connection" }),
-        /* @__PURE__ */ jsx("button", { style: primaryButtonStyle, onClick: () => void triggerJob(JOB_KEYS.initializeMemory), disabled: !canInitialize || jobs.loading, children: "Initialize memory for this company" }),
-        /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void triggerJob(JOB_KEYS.migrationScan), disabled: !companyId || jobs.loading, children: "Rescan migration sources" }),
-        /* @__PURE__ */ jsx("button", { style: buttonStyle, onClick: () => void triggerJob(JOB_KEYS.migrationImport), disabled: !companyId || jobs.loading, children: "Import history" }),
-        /* @__PURE__ */ jsx(
-          "button",
-          {
-            style: buttonStyle,
-            onClick: async () => {
-              if (!companyId) return;
-              try {
-                const result = await probePromptContext({
-                  companyId,
-                  issueId: context.entityId ?? void 0
-                });
-                setNotice(typeof result?.preview === "string" ? result.preview : "Prompt context probe completed.");
-                memoryStatus.refresh();
-              } catch (nextError) {
-                setError(nextError instanceof Error ? nextError.message : String(nextError));
-              }
+      /* @__PURE__ */ jsx("div", { style: { display: "grid", gap: "0.9rem" }, children: groupedActions.map((group) => /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.45rem" }, children: [
+        /* @__PURE__ */ jsx("div", { style: { fontSize: "0.82rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#475569" }, children: group.label }),
+        /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: "0.65rem", flexWrap: "wrap" }, children: group.actions.map((action) => {
+          const style = selectedActionKey === action.key ? primaryButtonStyle : action.variant === "muted" ? mutedButtonStyle : buttonStyle;
+          return /* @__PURE__ */ jsx(
+            "button",
+            {
+              style,
+              disabled: action.disabled,
+              onClick: () => {
+                setSelectedActionKey(action.key);
+                void action.run();
+              },
+              children: action.label
             },
-            disabled: !companyId,
-            children: "Preview prompt context"
-          }
-        ),
-        /* @__PURE__ */ jsx(
-          "button",
-          {
-            style: mutedButtonStyle,
-            onClick: async () => {
-              if (!companyId) return;
-              try {
-                await repairMappings({ companyId });
-                setNotice("Mappings repaired.");
-                memoryStatus.refresh();
-              } catch (nextError) {
-                setError(nextError instanceof Error ? nextError.message : String(nextError));
-              }
-            },
-            disabled: !companyId,
-            children: "Repair mappings"
-          }
-        )
-      ] }),
+            action.key
+          );
+        }) })
+      ] }, group.key)) }),
       notice ? /* @__PURE__ */ jsx("div", { style: { color: "#0f766e" }, children: notice }) : null,
       error || settings.error || jobs.error ? /* @__PURE__ */ jsx("div", { style: { color: "#b91c1c" }, children: error ?? settings.error ?? jobs.error }) : null
     ] })

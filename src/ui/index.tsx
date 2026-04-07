@@ -123,6 +123,17 @@ type CompanyRecord = {
   issuePrefix?: string | null;
 };
 
+type ActionGroupKey = "core" | "advanced";
+
+type SettingsAction = {
+  key: string;
+  label: string;
+  group: ActionGroupKey;
+  disabled: boolean;
+  variant?: "default" | "muted";
+  run: () => Promise<void>;
+};
+
 function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   return fetch(path, {
     credentials: "include",
@@ -401,7 +412,7 @@ function SecretSection(props: {
         </select>
       </label>
       <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
-        <button style={mutedButtonStyle} onClick={() => void refresh()} disabled={loading}>
+        <button style={buttonStyle} onClick={() => void refresh()} disabled={loading}>
           Refresh secrets
         </button>
         <button style={buttonStyle} onClick={() => setDraftOpen((value) => !value)}>
@@ -470,7 +481,7 @@ function SyncProfileSection(props: {
       <div>
         <div style={{ fontSize: "1rem", fontWeight: 600 }}>Recommended sync profile</div>
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          The public-host-compatible package syncs issue comments and issue documents, then serves Honcho memory primarily through tools and manual prompt previews.
+          The public-host-compatible package syncs issue comments and issue documents, then serves Honcho memory through tool-first workflows.
         </div>
       </div>
       <button style={buttonStyle} onClick={() => props.onConfigChange(recommended)}>
@@ -480,7 +491,6 @@ function SyncProfileSection(props: {
         {[
           ["Sync issue comments", props.config.syncIssueComments, "syncIssueComments"],
           ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
-          ["Inject Honcho prompt context", props.config.enablePromptContext, "enablePromptContext"],
           ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
           ["Observe me", props.config.observeMe, "observeMe"],
           ["Observe others", props.config.observeOthers, "observeOthers"],
@@ -549,10 +559,10 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
-  const probePromptContext = usePluginAction(ACTION_KEYS.probePromptContext);
   const repairMappings = usePluginAction(ACTION_KEYS.repairMappings);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedActionKey, setSelectedActionKey] = useState<string | null>(null);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
@@ -586,20 +596,97 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     }
   }
 
+  const actions: SettingsAction[] = [
+    {
+      key: "save-settings",
+      label: "Save settings",
+      group: "core",
+      disabled: settings.loading || settings.saving,
+      run: saveSettings,
+    },
+    {
+      key: "validate-config",
+      label: "Validate config",
+      group: "core",
+      disabled: settings.loading,
+      run: runValidation,
+    },
+    {
+      key: "test-connection",
+      label: "Test connection",
+      group: "core",
+      disabled: !canInitialize,
+      run: async () => {
+        setError(null);
+        setNotice(null);
+        await testConnection({});
+      },
+    },
+    {
+      key: "initialize-memory",
+      label: "Initialize memory for this company",
+      group: "core",
+      disabled: !canInitialize || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.initializeMemory);
+      },
+    },
+    {
+      key: "migration-scan",
+      label: "Rescan migration sources",
+      group: "advanced",
+      disabled: !companyId || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.migrationScan);
+      },
+    },
+    {
+      key: "migration-import",
+      label: "Import history",
+      group: "advanced",
+      disabled: !companyId || jobs.loading,
+      run: async () => {
+        await triggerJob(JOB_KEYS.migrationImport);
+      },
+    },
+    {
+      key: "repair-mappings",
+      label: "Repair mappings",
+      group: "advanced",
+      disabled: !companyId,
+      run: async () => {
+        if (!companyId) return;
+        try {
+          setError(null);
+          setNotice(null);
+          await repairMappings({ companyId });
+          setNotice("Mappings repaired.");
+          memoryStatus.refresh();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : String(nextError));
+        }
+      },
+    },
+  ];
+
+  const groupedActions: { key: ActionGroupKey; label: string; actions: SettingsAction[] }[] = [
+    { key: "core", label: "Core actions", actions: actions.filter((action) => action.group === "core") },
+    { key: "advanced", label: "Advanced actions", actions: actions.filter((action) => action.group === "advanced") },
+  ];
+
   return (
     <div style={sectionStyle}>
       <div style={heroStyle}>
         <div style={{ display: "grid", gap: "0.4rem" }}>
           <div style={{ fontSize: "1.35rem", fontWeight: 700 }}>Honcho Memory Activation</div>
           <div style={{ color: "#475569", maxWidth: "70ch" }}>
-            Connect Honcho, initialize memory for this company, import issue comments and issue documents, and use Honcho through tools and manual prompt previews without leaving Paperclip.
+            Connect Honcho, initialize memory for this company, and import issue comments and issue documents without leaving Paperclip.
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
           <StatusPill label={`Connection: ${companyStatus?.connectionStatus ?? "unknown"}`} tone={countTone(companyStatus?.connectionStatus)} />
           <StatusPill label={`Initialization: ${companyStatus?.initializationStatus ?? "not_started"}`} tone={countTone(companyStatus?.initializationStatus)} />
           <StatusPill label={`Migration: ${companyStatus?.migrationStatus ?? "not_started"}`} tone={countTone(companyStatus?.migrationStatus)} />
-          <StatusPill label={`Prompt context: ${companyStatus?.promptContextStatus ?? "inactive"}`} tone={countTone(companyStatus?.promptContextStatus)} />
         </div>
       </div>
 
@@ -629,7 +716,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         <Row label="Last initialization report" value={companyStatus?.lastInitializationReport ? "Available" : "None"} />
         <Row
           label="Compatibility mode"
-          value="Tool-first memory is active. Automatic prompt injection, run transcript import, and legacy workspace file import require a newer Paperclip host."
+          value="Tool-first memory is active. Run transcript import and legacy workspace file import require a newer Paperclip host."
         />
         {companyStatus?.lastError ? (
           <div style={{ color: "#b91c1c" }}>
@@ -650,60 +737,36 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
 
       <div style={cardStyle}>
         <div style={{ fontSize: "1rem", fontWeight: 600 }}>Actions</div>
-        <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
-          <button style={buttonStyle} onClick={() => void saveSettings()} disabled={settings.loading || settings.saving}>
-            Save settings
-          </button>
-          <button style={buttonStyle} onClick={() => void runValidation()} disabled={settings.loading}>
-            Validate config
-          </button>
-          <button style={buttonStyle} onClick={() => void testConnection({})} disabled={!canInitialize}>
-            Test connection
-          </button>
-          <button style={primaryButtonStyle} onClick={() => void triggerJob(JOB_KEYS.initializeMemory)} disabled={!canInitialize || jobs.loading}>
-            Initialize memory for this company
-          </button>
-          <button style={buttonStyle} onClick={() => void triggerJob(JOB_KEYS.migrationScan)} disabled={!companyId || jobs.loading}>
-            Rescan migration sources
-          </button>
-          <button style={buttonStyle} onClick={() => void triggerJob(JOB_KEYS.migrationImport)} disabled={!companyId || jobs.loading}>
-            Import history
-          </button>
-          <button
-            style={buttonStyle}
-            onClick={async () => {
-              if (!companyId) return;
-              try {
-                const result = await probePromptContext({
-                  companyId,
-                  issueId: context.entityId ?? undefined,
-                }) as { status: string; preview: string | null };
-                setNotice(typeof result?.preview === "string" ? result.preview : "Prompt context probe completed.");
-                memoryStatus.refresh();
-              } catch (nextError) {
-                setError(nextError instanceof Error ? nextError.message : String(nextError));
-              }
-            }}
-            disabled={!companyId}
-          >
-            Preview prompt context
-          </button>
-          <button
-            style={mutedButtonStyle}
-            onClick={async () => {
-              if (!companyId) return;
-              try {
-                await repairMappings({ companyId });
-                setNotice("Mappings repaired.");
-                memoryStatus.refresh();
-              } catch (nextError) {
-                setError(nextError instanceof Error ? nextError.message : String(nextError));
-              }
-            }}
-            disabled={!companyId}
-          >
-            Repair mappings
-          </button>
+        <div style={{ display: "grid", gap: "0.9rem" }}>
+          {groupedActions.map((group) => (
+            <div key={group.key} style={{ display: "grid", gap: "0.45rem" }}>
+              <div style={{ fontSize: "0.82rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#475569" }}>
+                {group.label}
+              </div>
+              <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
+                {group.actions.map((action) => {
+                  const style = selectedActionKey === action.key
+                    ? primaryButtonStyle
+                    : action.variant === "muted"
+                      ? mutedButtonStyle
+                      : buttonStyle;
+                  return (
+                    <button
+                      key={action.key}
+                      style={style}
+                      disabled={action.disabled}
+                      onClick={() => {
+                        setSelectedActionKey(action.key);
+                        void action.run();
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         {notice ? <div style={{ color: "#0f766e" }}>{notice}</div> : null}
         {error || settings.error || jobs.error ? <div style={{ color: "#b91c1c" }}>{error ?? settings.error ?? jobs.error}</div> : null}
