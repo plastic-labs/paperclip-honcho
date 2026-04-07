@@ -417,7 +417,6 @@ function SyncProfileSection(props) {
   const recommended = useMemo(() => ({
     syncIssueComments: true,
     syncIssueDocuments: true,
-    enablePromptContext: false,
     enablePeerChat: true
   }), []);
   return /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [

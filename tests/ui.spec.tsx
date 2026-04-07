@@ -22,11 +22,13 @@ import { HonchoSettingsPage } from "../src/ui/index.js";
 
 type FetchStubOptions = {
   configTestResponse?: Response | (() => Response | Promise<Response>);
+  configJsonOverrides?: Record<string, unknown>;
 };
 
 type PluginHookStubOptions = {
   testConnectionAction?: ReturnType<typeof vi.fn>;
   repairMappingsAction?: ReturnType<typeof vi.fn>;
+  memoryStatusOverrides?: Record<string, unknown>;
 };
 
 function installFetchStub(options: FetchStubOptions = {}) {
@@ -60,6 +62,7 @@ function installFetchStub(options: FetchStubOptions = {}) {
           disableDefaultNoisePatterns: false,
           stripPlatformMetadata: true,
           flushBeforeReset: false,
+          ...options.configJsonOverrides,
         },
       }), { status: 200 });
     }
@@ -105,6 +108,7 @@ function installPluginHookStubs(options: PluginHookStubOptions = {}) {
             lastInitializationReport: null,
             latestMigrationPreview: null,
             lastError: null,
+            ...options.memoryStatusOverrides,
           },
           counts: {
             mappedPeers: 2,
@@ -190,6 +194,17 @@ describe("HonchoSettingsPage", () => {
   });
 
   it("removes prompt-context UI from the settings page", async () => {
+    installFetchStub({
+      configJsonOverrides: {
+        enablePromptContext: true,
+      },
+    });
+    installPluginHookStubs({
+      memoryStatusOverrides: {
+        promptContextStatus: "active",
+      },
+    });
+
     render(<HonchoSettingsPage context={testContext} />);
 
     await waitForActionButtonsReady();
@@ -237,8 +252,42 @@ describe("HonchoSettingsPage", () => {
 
     await waitForActionButtonsReady();
 
-    fireEvent.click(screen.getByRole("button", { name: "Validate config" }));
+    const validateButton = screen.getByRole("button", { name: "Validate config" }) as HTMLButtonElement;
+    fireEvent.click(validateButton);
 
-    await waitFor(() => expect(screen.getByText("validation failed")).toBeTruthy());
+    await waitFor(() => {
+      expect(screen.getByText("validation failed")).toBeTruthy();
+      expect(isSelected(validateButton)).toBe(true);
+    });
+  });
+
+  it("preserves hidden prompt-context config when applying the recommended profile", async () => {
+    installFetchStub({
+      configJsonOverrides: {
+        enablePromptContext: true,
+        syncIssueComments: false,
+        syncIssueDocuments: false,
+        enablePeerChat: false,
+      },
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Apply recommended profile" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeTruthy());
+
+    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const saveCall = fetchCalls.find(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
+    expect(saveCall).toBeTruthy();
+
+    const body = JSON.parse(String(saveCall?.[1]?.body)) as { configJson: { enablePromptContext: boolean; syncIssueComments: boolean; syncIssueDocuments: boolean; enablePeerChat: boolean } };
+    expect(body.configJson.enablePromptContext).toBe(true);
+    expect(body.configJson.syncIssueComments).toBe(true);
+    expect(body.configJson.syncIssueDocuments).toBe(true);
+    expect(body.configJson.enablePeerChat).toBe(true);
   });
 });

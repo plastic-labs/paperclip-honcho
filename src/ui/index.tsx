@@ -472,7 +472,6 @@ function SyncProfileSection(props: {
   const recommended = useMemo<Partial<SettingsConfig>>(() => ({
     syncIssueComments: true,
     syncIssueDocuments: true,
-    enablePromptContext: false,
     enablePeerChat: true,
   }), []);
 
