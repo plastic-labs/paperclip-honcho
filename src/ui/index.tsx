@@ -596,6 +596,16 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     }
   }
 
+  async function runAction(action: SettingsAction) {
+    setSelectedActionKey(action.key);
+    try {
+      await action.run();
+    } catch (nextError) {
+      setNotice(null);
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  }
+
   const actions: SettingsAction[] = [
     {
       key: "save-settings",
@@ -756,8 +766,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
                       style={style}
                       disabled={action.disabled}
                       onClick={() => {
-                        setSelectedActionKey(action.key);
-                        void action.run();
+                        void runAction(action);
                       }}
                     >
                       {action.label}

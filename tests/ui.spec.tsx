@@ -20,7 +20,16 @@ vi.mock("@paperclipai/plugin-sdk/ui", async () => {
 
 import { HonchoSettingsPage } from "../src/ui/index.js";
 
-function installFetchStub() {
+type FetchStubOptions = {
+  configTestResponse?: Response | (() => Response | Promise<Response>);
+};
+
+type PluginHookStubOptions = {
+  testConnectionAction?: ReturnType<typeof vi.fn>;
+  repairMappingsAction?: ReturnType<typeof vi.fn>;
+};
+
+function installFetchStub(options: FetchStubOptions = {}) {
   const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
@@ -55,6 +64,11 @@ function installFetchStub() {
       }), { status: 200 });
     }
     if (url.endsWith("/config/test")) {
+      if (options.configTestResponse) {
+        return typeof options.configTestResponse === "function"
+          ? await options.configTestResponse()
+          : options.configTestResponse;
+      }
       return new Response(JSON.stringify({ valid: true, message: "Configuration is valid." }), { status: 200 });
     }
     if (url.endsWith("/jobs")) {
@@ -74,7 +88,7 @@ function installFetchStub() {
   vi.stubGlobal("fetch", fetchStub);
 }
 
-function installPluginHookStubs() {
+function installPluginHookStubs(options: PluginHookStubOptions = {}) {
   mockUsePluginData.mockImplementation((key: string) => {
     if (key === DATA_KEYS.memoryStatus) {
       return {
@@ -132,11 +146,17 @@ function installPluginHookStubs() {
   });
 
   mockUsePluginAction.mockImplementation((key: string) => {
-    if (key === ACTION_KEYS.testConnection) return vi.fn(async () => ({ ok: true }));
-    if (key === ACTION_KEYS.repairMappings) return vi.fn(async () => ({ ok: true }));
+    if (key === ACTION_KEYS.testConnection) return options.testConnectionAction ?? vi.fn(async () => ({ ok: true }));
+    if (key === ACTION_KEYS.repairMappings) return options.repairMappingsAction ?? vi.fn(async () => ({ ok: true }));
     if (key === ACTION_KEYS.probePromptContext) return vi.fn(async () => ({ status: "inactive", preview: null }));
     return vi.fn(async () => ({ ok: true }));
   });
+}
+
+async function waitForActionButtonsReady() {
+  await waitFor(() => expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole("button", { name: "Validate config" }) as HTMLButtonElement).disabled).toBe(false));
+  await waitFor(() => expect((screen.getByRole("button", { name: "Repair mappings" }) as HTMLButtonElement).disabled).toBe(false));
 }
 
 function isSelected(button: HTMLButtonElement) {
@@ -172,7 +192,7 @@ describe("HonchoSettingsPage", () => {
   it("removes prompt-context UI from the settings page", async () => {
     render(<HonchoSettingsPage context={testContext} />);
 
-    await waitFor(() => expect(screen.getByText("Save settings")).toBeTruthy());
+    await waitForActionButtonsReady();
 
     expect(screen.queryByText(/Prompt context:/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Preview prompt context" })).toBeNull();
@@ -183,7 +203,7 @@ describe("HonchoSettingsPage", () => {
   it("groups actions and tracks the last clicked action as selected", async () => {
     render(<HonchoSettingsPage context={testContext} />);
 
-    await waitFor(() => expect(screen.getByText("Save settings")).toBeTruthy());
+    await waitForActionButtonsReady();
 
     expect(screen.getByText("Core actions")).toBeTruthy();
     expect(screen.getByText("Advanced actions")).toBeTruthy();
@@ -206,5 +226,19 @@ describe("HonchoSettingsPage", () => {
     fireEvent.click(validateButton);
     await waitFor(() => expect(isSelected(validateButton)).toBe(true));
     expect(isSelected(repairButton)).toBe(false);
+  });
+
+  it("shows action failures in the shared error banner", async () => {
+    installFetchStub({
+      configTestResponse: new Response("validation failed", { status: 500 }),
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Validate config" }));
+
+    await waitFor(() => expect(screen.getByText("validation failed")).toBeTruthy());
   });
 });

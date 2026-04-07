@@ -527,6 +527,15 @@ function HonchoSettingsPage({ context }) {
       setError(nextError instanceof Error ? nextError.message : String(nextError));
     }
   }
+  async function runAction(action) {
+    setSelectedActionKey(action.key);
+    try {
+      await action.run();
+    } catch (nextError) {
+      setNotice(null);
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    }
+  }
   const actions = [
     {
       key: "save-settings",
@@ -671,8 +680,7 @@ function HonchoSettingsPage({ context }) {
               style,
               disabled: action.disabled,
               onClick: () => {
-                setSelectedActionKey(action.key);
-                void action.run();
+                void runAction(action);
               },
               children: action.label
             },

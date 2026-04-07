@@ -27,7 +27,7 @@ This change will split the remaining actions into `Core actions` and `Advanced a
 
 ## Current State
 
-The action area in [`src/ui/index.tsx`](/Users/adavya/Downloads/paperclip-honcho/src/ui/index.tsx) renders each button inline with handwritten JSX. The initialize action is permanently rendered with the filled style, while other actions use secondary styles. There is no state that tracks which action was clicked most recently, and there is no grouping model that distinguishes common setup actions from advanced operations.
+The action area in [`src/ui/index.tsx`](../../../src/ui/index.tsx) renders each button inline with handwritten JSX. The initialize action is permanently rendered with the filled style, while other actions use secondary styles. There is no state that tracks which action was clicked most recently, and there is no grouping model that distinguishes common setup actions from advanced operations.
 
 The settings page also still exposes prompt-context UI even though prompt context should be manually reintroduced only when the Paperclip host catches up. Today that includes prompt-context copy, the prompt-context status pill, the `Preview prompt context` action, and the prompt-context configuration toggle.
 
