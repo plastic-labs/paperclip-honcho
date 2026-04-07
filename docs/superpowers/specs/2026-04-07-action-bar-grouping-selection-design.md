@@ -1,38 +1,41 @@
-# Action Bar Grouping And Selection Design
+# Settings Page Action Bar And Prompt Context Removal Design
 
 ## Summary
 
-The Honcho settings page action bar currently renders all actions as a single flat set of peer buttons, and `Initialize memory for this company` is always styled as selected because it uses a fixed primary button style. This creates two UI problems:
+The Honcho settings page currently has two UI problems:
 
-1. Secondary and recovery-oriented actions look equally prominent to core setup actions.
-2. The selected styling does not reflect the user's last interaction.
+1. The action bar renders core setup actions and secondary actions as a single flat set of peer buttons, and `Initialize memory for this company` is always styled as selected because it uses a fixed primary button style.
+2. Prompt-context UI is shown even though prompt context should not be part of this settings page for now.
 
-This change will keep all existing actions available, split them into `Core actions` and `Advanced actions`, and make the selected styling follow the last clicked action.
+This change will split the remaining actions into `Core actions` and `Advanced actions`, make the selected styling follow the last clicked action, and remove prompt-context UI from the settings page entirely.
 
 ## Goals
 
-- Keep the full action surface available in the settings page.
+- Keep the remaining supported action surface available in the settings page.
 - Separate setup actions from advanced or recovery actions.
 - Ensure selected styling represents the last clicked action.
+- Remove prompt-context UI from the settings page for now.
 - Preserve existing action behavior, notices, errors, and refresh logic.
-- Add UI coverage for grouping and selection behavior.
+- Add UI coverage for grouping, selection behavior, and prompt-context removal.
 
 ## Non-Goals
 
 - Changing worker-side action semantics.
-- Removing any existing action from the UI.
 - Introducing host-level tabs, accordions, or permission gates.
 - Changing the success or failure messaging for actions.
+- Reworking prompt-context support elsewhere in the plugin.
 
 ## Current State
 
 The action area in [`src/ui/index.tsx`](/Users/adavya/Downloads/paperclip-honcho/src/ui/index.tsx) renders each button inline with handwritten JSX. The initialize action is permanently rendered with the filled style, while other actions use secondary styles. There is no state that tracks which action was clicked most recently, and there is no grouping model that distinguishes common setup actions from advanced operations.
 
+The settings page also still exposes prompt-context UI even though prompt context should be manually reintroduced only when the Paperclip host catches up. Today that includes prompt-context copy, the prompt-context status pill, the `Preview prompt context` action, and the prompt-context configuration toggle.
+
 ## Proposed Design
 
 ### Action Metadata
 
-Replace the current handwritten action button block with a small action-definition list in the settings page component. Each action definition will include:
+Replace the current handwritten action button block with a small action-definition list in the settings page component. Each remaining action definition will include:
 
 - `key`: stable identifier for styling and testing
 - `label`: button text
@@ -60,10 +63,20 @@ Render the action panel as two labeled groups in this order:
 
 - `Rescan migration sources`
 - `Import history`
-- `Preview prompt context`
 - `Repair mappings`
 
 Each group will render its buttons in the existing wrap layout so the UI remains responsive without introducing a larger layout change.
+
+### Prompt Context Removal
+
+Remove prompt-context UI from the settings page entirely for now. Specifically, the page should no longer render:
+
+- the `Prompt context: ...` status pill
+- the `Preview prompt context` action
+- the prompt-context settings toggle
+- prompt-context descriptive copy in the settings-page messaging
+
+This is an intentional product decision rather than a disabled state. Prompt context can be added back later when the host updates and the plugin is explicitly revised to support that surface again.
 
 ### Selected State
 
@@ -84,15 +97,15 @@ Use one shared base button style plus a selected variant derived from component 
 
 ### Notices And Errors
 
-All existing action handlers will keep their current behavior:
+All remaining action handlers will keep their current behavior:
 
 - `saveSettings` still saves configuration and refreshes memory status.
 - `runValidation` still uses `settings.test`.
 - `Test connection` still uses `testConnection`.
 - Job-trigger actions still save settings first, trigger the relevant job, and refresh data.
-- `Preview prompt context` and `Repair mappings` keep their current notice and error paths.
+- `Repair mappings` keeps its current notice and error paths.
 
-The change is limited to how actions are modeled and rendered in the UI.
+The change is limited to how the settings-page UI is modeled and rendered.
 
 ## Testing
 
@@ -100,8 +113,8 @@ Add UI-focused tests that verify:
 
 - the action panel renders separate `Core actions` and `Advanced actions` groups
 - no action is visually selected on initial render
-- clicking `Preview prompt context` marks that button as selected
 - clicking another enabled action moves selected styling to the newly clicked button
+- prompt-context UI is absent from the settings page
 
 Tests should avoid re-validating worker behavior already covered elsewhere and focus on the UI contract introduced by this change.
 
@@ -123,13 +136,14 @@ Mitigation: keep the current button sizing and wrap behavior, adding only lightw
 
 1. Add a data-driven action definition structure in the settings page component.
 2. Add `selectedActionKey` state and selected-style resolution.
-3. Render the actions in grouped sections with existing handlers wired through the action definitions.
-4. Add or extend UI tests for grouping and last-click selection.
+3. Remove prompt-context UI elements and related settings-page copy.
+4. Render the actions in grouped sections with existing handlers wired through the action definitions.
+5. Add or extend UI tests for grouping, last-click selection, and prompt-context absence.
 
 ## Acceptance Criteria
 
-- The settings page shows all current actions.
+- The settings page no longer shows prompt-context UI.
 - The actions are visually separated into `Core actions` and `Advanced actions`.
 - No button appears selected on first render.
 - After clicking an action, that action is the only one shown as selected.
-- Clicking `Preview prompt context` no longer leaves `Initialize memory for this company` styled as selected.
+- `Initialize memory for this company` is not styled as selected on initial render.
