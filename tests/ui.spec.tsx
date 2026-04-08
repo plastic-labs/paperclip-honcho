@@ -282,6 +282,38 @@ describe("HonchoSettingsPage", () => {
     expect(screen.getByText("Optional")).toBeTruthy();
   });
 
+  it("blocks saving and initialization when self-hosted Honcho has no base URL", async () => {
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.change(screen.getByLabelText("Deployment"), {
+      target: { value: "self-hosted" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Honcho API base URL is required for self-hosted or local deployments.")).toBeTruthy();
+    });
+
+    let fetchCalls = vi.mocked(fetch).mock.calls;
+    let saveCalls = fetchCalls.filter(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
+    expect(saveCalls).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize memory for this company" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Honcho API base URL is required for self-hosted or local deployments.")).toBeTruthy();
+    });
+
+    fetchCalls = vi.mocked(fetch).mock.calls;
+    saveCalls = fetchCalls.filter(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
+    const triggerCalls = fetchCalls.filter(([input]) => String(input).includes("/jobs/") && String(input).endsWith("/trigger"));
+    expect(saveCalls).toHaveLength(0);
+    expect(triggerCalls).toHaveLength(0);
+  });
+
   it("preserves hidden prompt-context config when applying the recommended profile", async () => {
     installFetchStub({
       configJsonOverrides: {

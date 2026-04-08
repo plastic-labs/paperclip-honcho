@@ -67,7 +67,7 @@ var DEFAULT_CONFIG = {
 function normalizeSettingsConfig(configJson) {
   const source = configJson ?? {};
   return {
-    honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() || DEFAULT_CONFIG.honchoApiBaseUrl : DEFAULT_CONFIG.honchoApiBaseUrl,
+    honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() : DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
@@ -185,6 +185,11 @@ function hostFetchJson(path, init) {
     return await response.json();
   });
 }
+function validateSettingsBeforePersist(config) {
+  if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
+    throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
+  }
+}
 function useSettingsConfig() {
   const [configJson, setConfigJson] = useState({ ...DEFAULT_CONFIG });
   const [loading, setLoading] = useState(true);
@@ -209,6 +214,7 @@ function useSettingsConfig() {
     };
   }, []);
   async function save(nextConfig) {
+    validateSettingsBeforePersist(nextConfig);
     setSaving(true);
     try {
       await hostFetchJson(`/api/plugins/${PLUGIN_ID}/config`, {

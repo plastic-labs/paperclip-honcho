@@ -155,6 +155,12 @@ function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 }
 
+function validateSettingsBeforePersist(config: SettingsConfig) {
+  if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
+    throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
+  }
+}
+
 function useSettingsConfig() {
   const [configJson, setConfigJson] = useState<SettingsConfig>({ ...DEFAULT_CONFIG });
   const [loading, setLoading] = useState(true);
@@ -184,6 +190,7 @@ function useSettingsConfig() {
   }, []);
 
   async function save(nextConfig: SettingsConfig) {
+    validateSettingsBeforePersist(nextConfig);
     setSaving(true);
     try {
       await hostFetchJson(`/api/plugins/${PLUGIN_ID}/config`, {

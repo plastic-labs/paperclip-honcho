@@ -8,7 +8,7 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
   const source = configJson ?? {};
   return {
     honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string"
-      ? source.honchoApiBaseUrl.trim() || DEFAULT_CONFIG.honchoApiBaseUrl
+      ? source.honchoApiBaseUrl.trim()
       : DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,

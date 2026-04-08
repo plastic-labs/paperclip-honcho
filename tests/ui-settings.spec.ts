@@ -12,6 +12,16 @@ describe("settings UI config helpers", () => {
     expect(resolved.honchoApiBaseUrl).toBe("http://127.0.0.1:8000/");
   });
 
+  it("preserves an explicitly empty Honcho base URL for self-hosted validation", () => {
+    const resolved = normalizeSettingsConfig({
+      honchoApiBaseUrl: "   ",
+      honchoApiKeySecretRef: "HONCHO_API_KEY",
+    });
+
+    expect(resolved.honchoApiBaseUrl).toBe("");
+    expect(getDeploymentMode(resolved)).toBe("self-hosted");
+  });
+
   it("treats the default base URL as Honcho Cloud", () => {
     expect(getDeploymentMode({
       honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl,
