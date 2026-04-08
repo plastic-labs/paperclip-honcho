@@ -12,6 +12,7 @@ import type {
   MigrationJobStatusData,
   MigrationPreview,
 } from "../types.js";
+import { getDeploymentMode, normalizeSettingsConfig, type HonchoDeploymentMode, type SettingsConfig } from "./settings-config.js";
 
 const sectionStyle: React.CSSProperties = {
   display: "grid",
@@ -76,6 +77,25 @@ const labelStyle: React.CSSProperties = {
   fontSize: "0.9rem",
 };
 
+const labelHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+};
+
+const optionalTagStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: "999px",
+  padding: "0.1rem 0.5rem",
+  fontSize: "0.72rem",
+  fontWeight: 600,
+  letterSpacing: "0.01em",
+  background: "rgba(15, 23, 42, 0.06)",
+  color: "#475569",
+};
+
 const gridStyle: React.CSSProperties = {
   display: "grid",
   gap: "0.9rem",
@@ -86,22 +106,6 @@ const statStyle: React.CSSProperties = {
   ...cardStyle,
   gap: "0.35rem",
   padding: "0.85rem",
-};
-
-type SettingsConfig = {
-  honchoApiBaseUrl: string;
-  honchoApiKeySecretRef: string;
-  workspacePrefix: string;
-  syncIssueComments: boolean;
-  syncIssueDocuments: boolean;
-  enablePromptContext: boolean;
-  enablePeerChat: boolean;
-  observeMe: boolean;
-  observeOthers: boolean;
-  noisePatterns: string[];
-  disableDefaultNoisePatterns: boolean;
-  stripPlatformMetadata: boolean;
-  flushBeforeReset: boolean;
 };
 
 type CompanySecretRecord = {
@@ -149,33 +153,6 @@ function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     }
     return await response.json() as T;
   });
-}
-
-function normalizeSettingsConfig(configJson: Record<string, unknown> | null | undefined): SettingsConfig {
-  const source = configJson ?? {};
-  return {
-    honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
-    workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
-    syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
-    syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
-    enablePromptContext: typeof source.enablePromptContext === "boolean" ? source.enablePromptContext : DEFAULT_CONFIG.enablePromptContext,
-    enablePeerChat: typeof source.enablePeerChat === "boolean" ? source.enablePeerChat : DEFAULT_CONFIG.enablePeerChat,
-    observeMe: typeof source.observeMe === "boolean"
-      ? source.observeMe
-      : typeof source.observeAgentPeers === "boolean"
-        ? source.observeAgentPeers
-        : DEFAULT_CONFIG.observeMe,
-    observeOthers: typeof source.observeOthers === "boolean"
-      ? source.observeOthers
-      : typeof source.observeAgentPeers === "boolean"
-        ? source.observeAgentPeers
-        : DEFAULT_CONFIG.observeOthers,
-    noisePatterns: Array.isArray(source.noisePatterns) ? source.noisePatterns.filter((value): value is string => typeof value === "string") : [...DEFAULT_CONFIG.noisePatterns],
-    disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
-    stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
-    flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset,
-  };
 }
 
 function useSettingsConfig() {
@@ -381,23 +358,78 @@ function SecretSection(props: {
   onConfigChange(next: Partial<SettingsConfig>): void;
 }) {
   const { secrets, refresh, createSecret, loading, creating, error } = useCompanySecrets(props.companyId);
+  const deploymentMode = getDeploymentMode(props.config);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [customBaseUrlDraft, setCustomBaseUrlDraft] = useState(
+    deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : "",
+  );
   const [draft, setDraft] = useState({
     name: "HONCHO_API_KEY",
     value: "",
     description: "Honcho API key for Paperclip memory activation",
   });
 
+  useEffect(() => {
+    if (deploymentMode === "self-hosted") {
+      setCustomBaseUrlDraft(props.config.honchoApiBaseUrl);
+    }
+  }, [deploymentMode, props.config.honchoApiBaseUrl]);
+
+  function updateDeploymentMode(nextMode: HonchoDeploymentMode) {
+    if (nextMode === "cloud") {
+      props.onConfigChange({ honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl });
+      return;
+    }
+
+    const nextBaseUrl = deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : customBaseUrlDraft;
+    props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+  }
+
   return (
     <div style={cardStyle}>
       <div>
         <div style={{ fontSize: "1rem", fontWeight: 600 }}>Connect Honcho</div>
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          The base URL is fixed to `https://api.honcho.dev`. Create or select a Paperclip secret that holds the Honcho API key.
+          Choose Honcho Cloud or a self-hosted/local deployment, then create or select a Paperclip secret that holds the Honcho API key.
         </div>
       </div>
       <label style={labelStyle}>
-        <span>Honcho API key secret</span>
+        <span style={labelHeaderStyle}>Deployment</span>
+        <select
+          value={deploymentMode}
+          onChange={(event) => updateDeploymentMode(event.target.value as HonchoDeploymentMode)}
+          style={selectStyle}
+        >
+          <option value="cloud">Honcho Cloud</option>
+          <option value="self-hosted">Self-hosted / local</option>
+        </select>
+      </label>
+      {deploymentMode === "cloud" ? (
+        <div style={{ color: "#475569", fontSize: "0.9rem" }}>
+          Using the default Honcho Cloud base URL: `{DEFAULT_CONFIG.honchoApiBaseUrl}`
+        </div>
+      ) : (
+        <label style={labelStyle}>
+          <span style={labelHeaderStyle}>Honcho API base URL</span>
+          <input
+            value={props.config.honchoApiBaseUrl}
+            onChange={(event) => {
+              const nextBaseUrl = event.target.value;
+              setCustomBaseUrlDraft(nextBaseUrl);
+              props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+            }}
+            style={inputStyle}
+          />
+          <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+            This URL must be reachable from the Paperclip host runtime. If Paperclip runs in Docker, `localhost` may not point at your machine.
+          </span>
+        </label>
+      )}
+      <label style={labelStyle}>
+        <span style={labelHeaderStyle}>
+          <span>Honcho API key secret</span>
+          {deploymentMode === "self-hosted" ? <span style={optionalTagStyle}>Optional</span> : null}
+        </span>
         <select
           value={props.config.honchoApiKeySecretRef}
           onChange={(event) => props.onConfigChange({ honchoApiKeySecretRef: event.target.value })}

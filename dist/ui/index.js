@@ -63,6 +63,29 @@ var DEFAULT_CONFIG = {
   flushBeforeReset: false
 };
 
+// src/ui/settings-config.ts
+function normalizeSettingsConfig(configJson) {
+  const source = configJson ?? {};
+  return {
+    honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() || DEFAULT_CONFIG.honchoApiBaseUrl : DEFAULT_CONFIG.honchoApiBaseUrl,
+    honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
+    workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
+    syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
+    syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
+    enablePromptContext: typeof source.enablePromptContext === "boolean" ? source.enablePromptContext : DEFAULT_CONFIG.enablePromptContext,
+    enablePeerChat: typeof source.enablePeerChat === "boolean" ? source.enablePeerChat : DEFAULT_CONFIG.enablePeerChat,
+    observeMe: typeof source.observeMe === "boolean" ? source.observeMe : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeMe,
+    observeOthers: typeof source.observeOthers === "boolean" ? source.observeOthers : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeOthers,
+    noisePatterns: Array.isArray(source.noisePatterns) ? source.noisePatterns.filter((value) => typeof value === "string") : [...DEFAULT_CONFIG.noisePatterns],
+    disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
+    stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
+    flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset
+  };
+}
+function getDeploymentMode(config) {
+  return config.honchoApiBaseUrl === DEFAULT_CONFIG.honchoApiBaseUrl ? "cloud" : "self-hosted";
+}
+
 // src/ui/index.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
 var sectionStyle = {
@@ -119,6 +142,23 @@ var labelStyle = {
   gap: "0.4rem",
   fontSize: "0.9rem"
 };
+var labelHeaderStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  flexWrap: "wrap"
+};
+var optionalTagStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: "999px",
+  padding: "0.1rem 0.5rem",
+  fontSize: "0.72rem",
+  fontWeight: 600,
+  letterSpacing: "0.01em",
+  background: "rgba(15, 23, 42, 0.06)",
+  color: "#475569"
+};
 var gridStyle = {
   display: "grid",
   gap: "0.9rem",
@@ -144,24 +184,6 @@ function hostFetchJson(path, init) {
     }
     return await response.json();
   });
-}
-function normalizeSettingsConfig(configJson) {
-  const source = configJson ?? {};
-  return {
-    honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
-    workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
-    syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
-    syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
-    enablePromptContext: typeof source.enablePromptContext === "boolean" ? source.enablePromptContext : DEFAULT_CONFIG.enablePromptContext,
-    enablePeerChat: typeof source.enablePeerChat === "boolean" ? source.enablePeerChat : DEFAULT_CONFIG.enablePeerChat,
-    observeMe: typeof source.observeMe === "boolean" ? source.observeMe : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeMe,
-    observeOthers: typeof source.observeOthers === "boolean" ? source.observeOthers : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeOthers,
-    noisePatterns: Array.isArray(source.noisePatterns) ? source.noisePatterns.filter((value) => typeof value === "string") : [...DEFAULT_CONFIG.noisePatterns],
-    disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
-    stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
-    flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset
-  };
 }
 function useSettingsConfig() {
   const [configJson, setConfigJson] = useState({ ...DEFAULT_CONFIG });
@@ -330,19 +352,74 @@ function countTone(value, good = ["complete", "connected", "active", "mapped", "
 }
 function SecretSection(props) {
   const { secrets, refresh, createSecret, loading, creating, error } = useCompanySecrets(props.companyId);
+  const deploymentMode = getDeploymentMode(props.config);
   const [draftOpen, setDraftOpen] = useState(false);
+  const [customBaseUrlDraft, setCustomBaseUrlDraft] = useState(
+    deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : ""
+  );
   const [draft, setDraft] = useState({
     name: "HONCHO_API_KEY",
     value: "",
     description: "Honcho API key for Paperclip memory activation"
   });
+  useEffect(() => {
+    if (deploymentMode === "self-hosted") {
+      setCustomBaseUrlDraft(props.config.honchoApiBaseUrl);
+    }
+  }, [deploymentMode, props.config.honchoApiBaseUrl]);
+  function updateDeploymentMode(nextMode) {
+    if (nextMode === "cloud") {
+      props.onConfigChange({ honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl });
+      return;
+    }
+    const nextBaseUrl = deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : customBaseUrlDraft;
+    props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+  }
   return /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
     /* @__PURE__ */ jsxs("div", { children: [
       /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Connect Honcho" }),
-      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "The base URL is fixed to `https://api.honcho.dev`. Create or select a Paperclip secret that holds the Honcho API key." })
+      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "Choose Honcho Cloud or a self-hosted/local deployment, then create or select a Paperclip secret that holds the Honcho API key." })
     ] }),
     /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
-      /* @__PURE__ */ jsx("span", { children: "Honcho API key secret" }),
+      /* @__PURE__ */ jsx("span", { style: labelHeaderStyle, children: "Deployment" }),
+      /* @__PURE__ */ jsxs(
+        "select",
+        {
+          value: deploymentMode,
+          onChange: (event) => updateDeploymentMode(event.target.value),
+          style: selectStyle,
+          children: [
+            /* @__PURE__ */ jsx("option", { value: "cloud", children: "Honcho Cloud" }),
+            /* @__PURE__ */ jsx("option", { value: "self-hosted", children: "Self-hosted / local" })
+          ]
+        }
+      )
+    ] }),
+    deploymentMode === "cloud" ? /* @__PURE__ */ jsxs("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: [
+      "Using the default Honcho Cloud base URL: `",
+      DEFAULT_CONFIG.honchoApiBaseUrl,
+      "`"
+    ] }) : /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
+      /* @__PURE__ */ jsx("span", { style: labelHeaderStyle, children: "Honcho API base URL" }),
+      /* @__PURE__ */ jsx(
+        "input",
+        {
+          value: props.config.honchoApiBaseUrl,
+          onChange: (event) => {
+            const nextBaseUrl = event.target.value;
+            setCustomBaseUrlDraft(nextBaseUrl);
+            props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+          },
+          style: inputStyle
+        }
+      ),
+      /* @__PURE__ */ jsx("span", { style: { color: "#475569", fontSize: "0.82rem" }, children: "This URL must be reachable from the Paperclip host runtime. If Paperclip runs in Docker, `localhost` may not point at your machine." })
+    ] }),
+    /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
+      /* @__PURE__ */ jsxs("span", { style: labelHeaderStyle, children: [
+        /* @__PURE__ */ jsx("span", { children: "Honcho API key secret" }),
+        deploymentMode === "self-hosted" ? /* @__PURE__ */ jsx("span", { style: optionalTagStyle, children: "Optional" }) : null
+      ] }),
       /* @__PURE__ */ jsxs(
         "select",
         {

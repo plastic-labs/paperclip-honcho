@@ -261,6 +261,27 @@ describe("HonchoSettingsPage", () => {
     });
   });
 
+  it("hides the base URL placeholder and marks the API key as optional for self-hosted deployments", async () => {
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    expect(screen.queryByText("Optional")).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Deployment"), {
+      target: { value: "self-hosted" },
+    });
+
+    const baseUrlLabel = screen.getByText("Honcho API base URL").closest("label");
+    const baseUrlInput = baseUrlLabel?.querySelector("input") as HTMLInputElement | null;
+
+    if (!baseUrlInput) {
+      throw new Error("expected Honcho API base URL input to be rendered");
+    }
+    expect(baseUrlInput.getAttribute("placeholder")).toBeNull();
+    expect(screen.getByText("Optional")).toBeTruthy();
+  });
+
   it("preserves hidden prompt-context config when applying the recommended profile", async () => {
     installFetchStub({
       configJsonOverrides: {
