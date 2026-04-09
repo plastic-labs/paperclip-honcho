@@ -39,11 +39,11 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Honcho API Base URL",
         default: DEFAULT_CONFIG.honchoApiBaseUrl,
       },
-      honchoApiKeySecretRef: {
+      honchoApiKey: {
         type: "string",
-        title: "Honcho API Key Secret",
+        title: "Honcho API Key",
         format: "secret-ref",
-        default: DEFAULT_CONFIG.honchoApiKeySecretRef,
+        default: DEFAULT_CONFIG.honchoApiKey,
       },
       workspacePrefix: {
         type: "string",
@@ -70,15 +70,15 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Enable Peer Chat Tool",
         default: DEFAULT_CONFIG.enablePeerChat,
       },
-      observeMe: {
+      observe_me: {
         type: "boolean",
-        title: "Observe Me",
-        default: DEFAULT_CONFIG.observeMe,
+        title: "observe_me",
+        default: DEFAULT_CONFIG.observe_me,
       },
-      observeOthers: {
+      observe_others: {
         type: "boolean",
-        title: "Observe Others",
-        default: DEFAULT_CONFIG.observeOthers,
+        title: "observe_others",
+        default: DEFAULT_CONFIG.observe_others,
       },
       noisePatterns: {
         type: "array",

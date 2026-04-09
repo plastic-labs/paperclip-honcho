@@ -58,13 +58,13 @@ describe("honcho memory jobs", () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
-        honchoApiKeySecretRef: "",
+        honchoApiKey: "",
       },
     });
 
     await plugin.definition.setup(harness.ctx);
 
-    await expect(harness.runJob("initialize-memory")).rejects.toThrow("Honcho API key secret ref is required");
+    await expect(harness.runJob("initialize-memory")).rejects.toThrow("Honcho API key is required");
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -72,10 +72,10 @@ describe("honcho memory jobs", () => {
     expect(status.companyStatus).toMatchObject({
       connectionStatus: "auth_failed",
       initializationStatus: "failed",
-      promptContextStatus: "inactive",
-      pendingFailureCount: 1,
-      lastError: expect.objectContaining({
-        message: expect.stringContaining("Honcho API key secret ref is required"),
+        promptContextStatus: "inactive",
+        pendingFailureCount: 1,
+        lastError: expect.objectContaining({
+        message: expect.stringContaining("Honcho API key is required"),
       }),
     });
   });
@@ -85,7 +85,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness({
       config: {
         honchoApiBaseUrl: "http://127.0.0.1:8000",
-        honchoApiKeySecretRef: "",
+        honchoApiKey: "",
       },
     });
 

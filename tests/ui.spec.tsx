@@ -54,14 +54,14 @@ function installFetchStub(options: FetchStubOptions = {}) {
       }
       return new Response(JSON.stringify({
         configJson: {
-          honchoApiKeySecretRef: "secret_1",
+          honchoApiKey: "secret_1",
           workspacePrefix: "paperclip",
           syncIssueComments: true,
           syncIssueDocuments: true,
           enablePromptContext: false,
           enablePeerChat: true,
-          observeMe: true,
-          observeOthers: true,
+          observe_me: true,
+          observe_others: true,
           noisePatterns: [],
           disableDefaultNoisePatterns: false,
           stripPlatformMetadata: true,
@@ -364,6 +364,7 @@ describe("HonchoSettingsPage", () => {
 
     await waitForActionButtonsReady();
 
+    expect(screen.getByText("Honcho API Key")).toBeTruthy();
     expect(screen.queryByText("Optional")).toBeNull();
 
     fireEvent.change(screen.getByLabelText("Deployment"), {
@@ -415,7 +416,7 @@ describe("HonchoSettingsPage", () => {
   it("keeps activation enabled for self-hosted Honcho without an API key secret", async () => {
     installFetchStub({
       configJsonOverrides: {
-        honchoApiKeySecretRef: "",
+        honchoApiKey: "",
       },
     });
 
@@ -469,5 +470,27 @@ describe("HonchoSettingsPage", () => {
     expect(body.configJson.syncIssueComments).toBe(true);
     expect(body.configJson.syncIssueDocuments).toBe(true);
     expect(body.configJson.enablePeerChat).toBe(true);
+  });
+
+  it("saves the renamed public config keys", async () => {
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeTruthy());
+
+    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const saveCall = fetchCalls.find(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
+    expect(saveCall).toBeTruthy();
+
+    const body = JSON.parse(String(saveCall?.[1]?.body)) as { configJson: Record<string, unknown> };
+    expect(body.configJson.honchoApiKey).toBe("secret_1");
+    expect(body.configJson.observe_me).toBe(true);
+    expect(body.configJson.observe_others).toBe(true);
+    expect(body.configJson.honchoApiKeySecretRef).toBeUndefined();
+    expect(body.configJson.observeMe).toBeUndefined();
+    expect(body.configJson.observeOthers).toBeUndefined();
   });
 });

@@ -446,12 +446,12 @@ function SecretSection(props: {
       )}
       <label style={labelStyle}>
         <span style={labelHeaderStyle}>
-          <span>Honcho API key secret</span>
+          <span>Honcho API Key</span>
           {deploymentMode === "self-hosted" ? <span style={optionalTagStyle}>Optional</span> : null}
         </span>
         <select
-          value={props.config.honchoApiKeySecretRef}
-          onChange={(event) => props.onConfigChange({ honchoApiKeySecretRef: event.target.value })}
+          value={props.config.honchoApiKey}
+          onChange={(event) => props.onConfigChange({ honchoApiKey: event.target.value })}
           style={selectStyle}
         >
           <option value="">Select a Paperclip secret…</option>
@@ -502,7 +502,7 @@ function SecretSection(props: {
             disabled={!props.companyId || !draft.value.trim() || creating}
             onClick={async () => {
               const created = await createSecret(draft);
-              props.onConfigChange({ honchoApiKeySecretRef: created.id });
+              props.onConfigChange({ honchoApiKey: created.id });
               setDraft((current) => ({ ...current, value: "" }));
               setDraftOpen(false);
             }}
@@ -542,8 +542,8 @@ function SyncProfileSection(props: {
           ["Sync issue comments", props.config.syncIssueComments, "syncIssueComments"],
           ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
           ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
-          ["Observe me", props.config.observeMe, "observeMe"],
-          ["Observe others", props.config.observeOthers, "observeOthers"],
+          ["observe_me", props.config.observe_me, "observe_me"],
+          ["observe_others", props.config.observe_others, "observe_others"],
         ].map(([label, checked, key]) => (
           <label key={String(key)} style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
             <input
@@ -619,7 +619,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const companyStatus = status?.companyStatus;
   const deploymentMode = getDeploymentMode(settings.configJson);
   const canRunConnectionActions = deploymentMode === "cloud"
-    ? Boolean(companyId && settings.configJson.honchoApiKeySecretRef)
+    ? Boolean(companyId && settings.configJson.honchoApiKey)
     : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
   const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
 

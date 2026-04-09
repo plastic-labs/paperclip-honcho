@@ -19,7 +19,7 @@ describe("honcho memory actions and status data", () => {
 
     expect(status.config).toMatchObject({
       honchoApiBaseUrl: "https://api.honcho.dev",
-      honchoApiKeySecretRef: "HONCHO_API_KEY",
+      honchoApiKey: "HONCHO_API_KEY",
       workspacePrefix: "paperclip",
       syncIssueComments: true,
       syncIssueDocuments: true,

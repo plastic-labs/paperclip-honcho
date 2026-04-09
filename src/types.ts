@@ -9,12 +9,15 @@ import type {
 
 export type HonchoPluginConfig = {
   honchoApiBaseUrl?: string;
+  honchoApiKey?: string;
   honchoApiKeySecretRef?: string;
   workspacePrefix?: string;
   syncIssueComments?: boolean;
   syncIssueDocuments?: boolean;
   enablePromptContext?: boolean;
   enablePeerChat?: boolean;
+  observe_me?: boolean;
+  observe_others?: boolean;
   observeMe?: boolean;
   observeOthers?: boolean;
   observeAgentPeers?: boolean;
@@ -26,14 +29,14 @@ export type HonchoPluginConfig = {
 
 export type HonchoResolvedConfig = {
   honchoApiBaseUrl: string;
-  honchoApiKeySecretRef: string;
+  honchoApiKey: string;
   workspacePrefix: string;
   syncIssueComments: boolean;
   syncIssueDocuments: boolean;
   enablePromptContext: boolean;
   enablePeerChat: boolean;
-  observeMe: boolean;
-  observeOthers: boolean;
+  observe_me: boolean;
+  observe_others: boolean;
   noisePatterns: string[];
   disableDefaultNoisePatterns: boolean;
   stripPlatformMetadata: boolean;
@@ -285,8 +288,8 @@ export type IssueMemoryStatusData = {
     syncIssueDocuments: boolean;
     enablePromptContext: boolean;
     enablePeerChat: boolean;
-    observeMe: boolean;
-    observeOthers: boolean;
+    observe_me: boolean;
+    observe_others: boolean;
   };
 };
 
@@ -300,14 +303,14 @@ export type SetupChecklistItem = {
 export type MemoryStatusData = {
   config: {
     honchoApiBaseUrl: string;
-    honchoApiKeySecretRef: string;
+    honchoApiKey: string;
     workspacePrefix: string;
     syncIssueComments: boolean;
     syncIssueDocuments: boolean;
     enablePromptContext: boolean;
     enablePeerChat: boolean;
-    observeMe: boolean;
-    observeOthers: boolean;
+    observe_me: boolean;
+    observe_others: boolean;
   };
   validation: {
     ok: boolean;

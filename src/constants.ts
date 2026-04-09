@@ -126,14 +126,14 @@ export const RUNTIME_LAUNCHERS: PluginLauncherRegistration[] = [
 
 export const DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
-  honchoApiKeySecretRef: "",
+  honchoApiKey: "",
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeMe: true,
-  observeOthers: true,
+  observe_me: true,
+  observe_others: true,
   noisePatterns: [] as string[],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
