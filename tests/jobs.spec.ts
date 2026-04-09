@@ -80,6 +80,55 @@ describe("honcho memory jobs", () => {
     });
   });
 
+  it("initialize-memory works against self-hosted Honcho without an API key secret", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "http://127.0.0.1:8000",
+        honchoApiKeySecretRef: "",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const status = await harness.getData<Record<string, unknown>>("memory-status", {
+      companyId: "co_1",
+    });
+    expect(status.companyStatus).toMatchObject({
+      connectionStatus: "connected",
+      initializationStatus: "complete",
+    });
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.headers.authorization).toBeUndefined();
+  });
+
+  it("initialize-memory marks migration complete even when there is nothing to import", async () => {
+    installFetchMock();
+    const harness = createHonchoHarness({
+      seed: {
+        issueComments: [],
+        issueDocuments: [],
+        documentRevisions: [],
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const status = await harness.getData<Record<string, unknown>>("memory-status", {
+      companyId: "co_1",
+    });
+    expect(status.companyStatus).toMatchObject({
+      initializationStatus: "complete",
+      migrationStatus: "complete",
+      latestMigrationPreview: expect.objectContaining({
+        estimatedMessages: 0,
+      }),
+    });
+  });
+
   it("migration-scan produces stable preview counts for comments and documents", async () => {
     installFetchMock();
     const harness = createHonchoHarness();

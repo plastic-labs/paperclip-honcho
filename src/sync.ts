@@ -949,7 +949,7 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
       workspaceStatus: "created",
       peerStatus: counts.mappedPeers > 0 ? "complete" : "partial",
       initializationStatus: "complete",
-      migrationStatus: preview.estimatedMessages > 0 ? "complete" : "preview_ready",
+      migrationStatus: "complete",
       promptContextStatus: probe.status,
       lastSuccessfulSyncAt: new Date().toISOString(),
       lastError: null,

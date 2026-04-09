@@ -23,6 +23,8 @@ import { HonchoSettingsPage } from "../src/ui/index.js";
 type FetchStubOptions = {
   configTestResponse?: Response | (() => Response | Promise<Response>);
   configJsonOverrides?: Record<string, unknown>;
+  migrationJobStatusResponses?: Array<Record<string, unknown> | null>;
+  onJobTrigger?: (url: string) => void;
 };
 
 type PluginHookStubOptions = {
@@ -32,6 +34,8 @@ type PluginHookStubOptions = {
 };
 
 function installFetchStub(options: FetchStubOptions = {}) {
+  const migrationJobStatusResponses = [...(options.migrationJobStatusResponses ?? [])];
+  let lastTriggeredJobKey: string | null = null;
   const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
 
@@ -81,7 +85,28 @@ function installFetchStub(options: FetchStubOptions = {}) {
         { id: "job_import", jobKey: "migration-import", displayName: "Import", status: "idle" },
       ]), { status: 200 });
     }
+    if (url.includes(`/data/${DATA_KEYS.migrationJobStatus}`)) {
+      const checkpoint = migrationJobStatusResponses.length > 0
+        ? migrationJobStatusResponses.shift() ?? null
+        : {
+            activeJobKey: lastTriggeredJobKey,
+            status: lastTriggeredJobKey ? "complete" : "idle",
+            processed: 0,
+            succeeded: 0,
+            skipped: 0,
+            failed: 0,
+            currentSourceType: null,
+            currentEntityId: null,
+            lastError: null,
+            updatedAt: null,
+          };
+      return new Response(JSON.stringify({ data: { checkpoint, companyId: "co_1" } }), { status: 200 });
+    }
     if (url.includes("/jobs/") && url.endsWith("/trigger")) {
+      if (url.includes("/jobs/job_init/trigger")) lastTriggeredJobKey = "initialize-memory";
+      if (url.includes("/jobs/job_scan/trigger")) lastTriggeredJobKey = "migration-scan";
+      if (url.includes("/jobs/job_import/trigger")) lastTriggeredJobKey = "migration-import";
+      options.onJobTrigger?.(url);
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }
 
@@ -159,16 +184,7 @@ function installPluginHookStubs(options: PluginHookStubOptions = {}) {
 
 async function waitForActionButtonsReady() {
   await waitFor(() => expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(false));
-  await waitFor(() => expect((screen.getByRole("button", { name: "Validate config" }) as HTMLButtonElement).disabled).toBe(false));
-  await waitFor(() => expect((screen.getByRole("button", { name: "Repair mappings" }) as HTMLButtonElement).disabled).toBe(false));
-}
-
-function isSelected(button: HTMLButtonElement) {
-  return button.style.background === "rgb(15, 23, 42)" && button.style.color === "white";
-}
-
-function hasDefaultButtonStyle(button: HTMLButtonElement) {
-  return button.style.background === "white" && button.style.color === "rgb(15, 23, 42)";
+  await waitFor(() => expect(screen.getByRole("button", { name: "Initialize Honcho memory" })).toBeTruthy());
 }
 
 const testContext: PluginSettingsPageProps["context"] = {
@@ -215,35 +231,96 @@ describe("HonchoSettingsPage", () => {
     expect(screen.queryByText(/manual prompt previews/i)).toBeNull();
   });
 
-  it("groups actions and tracks the last clicked action as selected", async () => {
+  it("shows only save settings and initialize honcho memory in the action section", async () => {
     render(<HonchoSettingsPage context={testContext} />);
 
     await waitForActionButtonsReady();
 
-    expect(screen.getByText("Core actions")).toBeTruthy();
-    expect(screen.getByText("Advanced actions")).toBeTruthy();
-
-    const initializeButton = screen.getByRole("button", { name: "Initialize memory for this company" }) as HTMLButtonElement;
-    const repairButton = screen.getByRole("button", { name: "Repair mappings" }) as HTMLButtonElement;
-    const validateButton = screen.getByRole("button", { name: "Validate config" }) as HTMLButtonElement;
-    const refreshSecretsButton = screen.getByRole("button", { name: "Refresh secrets" }) as HTMLButtonElement;
-
-    expect(isSelected(initializeButton)).toBe(false);
-    expect(isSelected(repairButton)).toBe(false);
-    expect(isSelected(validateButton)).toBe(false);
-    expect(hasDefaultButtonStyle(repairButton)).toBe(true);
-    expect(hasDefaultButtonStyle(refreshSecretsButton)).toBe(true);
-
-    fireEvent.click(repairButton);
-    await waitFor(() => expect(isSelected(repairButton)).toBe(true));
-    expect(isSelected(validateButton)).toBe(false);
-
-    fireEvent.click(validateButton);
-    await waitFor(() => expect(isSelected(validateButton)).toBe(true));
-    expect(isSelected(repairButton)).toBe(false);
+    expect(screen.getByRole("button", { name: "Save settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Initialize Honcho memory" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Validate config" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Test connection" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Initialize memory for this company" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rescan migration sources" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Import history" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Repair mappings" })).toBeNull();
   });
 
-  it("shows action failures in the shared error banner", async () => {
+  it("runs activation steps in order and reports progress", async () => {
+    const triggeredJobs: string[] = [];
+    let resolveValidation: (() => void) | null = null;
+    installFetchStub({
+      configTestResponse: () => new Promise<Response>((resolve) => {
+        resolveValidation = () => resolve(new Response(JSON.stringify({ valid: true, message: "Configuration is valid." }), { status: 200 }));
+      }),
+      onJobTrigger: (url) => {
+        triggeredJobs.push(url);
+      },
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Step 1 of 3: Validating config")).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Save settings" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Validating config..." }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    resolveValidation?.();
+
+    await waitFor(() => {
+      expect(screen.getByText("Honcho activation completed.")).toBeTruthy();
+    });
+
+    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const configTestIndex = requestUrls.findIndex((url) => url.endsWith("/config/test"));
+    const initializeIndex = requestUrls.findIndex((url) => url.includes("/jobs/job_init/trigger"));
+
+    expect(configTestIndex).toBeGreaterThan(-1);
+    expect(initializeIndex).toBeGreaterThan(configTestIndex);
+    expect(triggeredJobs).toEqual([
+      "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
+    ]);
+  });
+
+  it("waits for each triggered job to complete before starting the next one", async () => {
+    const triggeredJobs: string[] = [];
+    installFetchStub({
+      migrationJobStatusResponses: [
+        { activeJobKey: "initialize-memory", status: "running", processed: 0, succeeded: 0, skipped: 0, failed: 0, currentSourceType: null, currentEntityId: null, lastError: null, updatedAt: "2026-04-09T21:39:00.000Z" },
+        { activeJobKey: "initialize-memory", status: "complete", processed: 0, succeeded: 0, skipped: 0, failed: 0, currentSourceType: null, currentEntityId: null, lastError: null, updatedAt: "2026-04-09T21:39:01.000Z" },
+      ],
+      onJobTrigger: (url) => {
+        triggeredJobs.push(url);
+      },
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Honcho activation completed.")).toBeTruthy();
+    });
+
+    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const initializeTriggerIndex = requestUrls.findIndex((url) => url.includes("/jobs/job_init/trigger"));
+    const initializeStatusCompleteIndex = requestUrls.findIndex((url, index) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`) && index > initializeTriggerIndex);
+
+    expect(initializeTriggerIndex).toBeGreaterThan(-1);
+    expect(initializeStatusCompleteIndex).toBeGreaterThan(initializeTriggerIndex);
+    expect(triggeredJobs).toEqual([
+      "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
+    ]);
+  });
+
+  it("stops activation on the first failure and shows the step-specific error", async () => {
     installFetchStub({
       configTestResponse: new Response("validation failed", { status: 500 }),
     });
@@ -252,13 +329,34 @@ describe("HonchoSettingsPage", () => {
 
     await waitForActionButtonsReady();
 
-    const validateButton = screen.getByRole("button", { name: "Validate config" }) as HTMLButtonElement;
-    fireEvent.click(validateButton);
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
 
     await waitFor(() => {
-      expect(screen.getByText("validation failed")).toBeTruthy();
-      expect(isSelected(validateButton)).toBe(true);
+      expect(screen.getByText("Activation failed during validating config: validation failed")).toBeTruthy();
     });
+
+    const fetchCalls = vi.mocked(fetch).mock.calls;
+    const triggerCalls = fetchCalls.filter(([input]) => String(input).includes("/jobs/") && String(input).endsWith("/trigger"));
+    expect(triggerCalls).toHaveLength(0);
+  });
+
+  it("renders structured thrown errors without falling back to object stringification", async () => {
+    installFetchStub({
+      configTestResponse: async () => {
+        throw { error: "validation failed" };
+      },
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Activation failed during validating config: validation failed")).toBeTruthy();
+    });
+    expect(screen.queryByText("[object Object]")).toBeNull();
   });
 
   it("hides the base URL placeholder and marks the API key as optional for self-hosted deployments", async () => {
@@ -301,7 +399,7 @@ describe("HonchoSettingsPage", () => {
     let saveCalls = fetchCalls.filter(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
     expect(saveCalls).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Initialize memory for this company" }));
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
 
     await waitFor(() => {
       expect(screen.getByText("Honcho API base URL is required for self-hosted or local deployments.")).toBeTruthy();
@@ -312,6 +410,35 @@ describe("HonchoSettingsPage", () => {
     const triggerCalls = fetchCalls.filter(([input]) => String(input).includes("/jobs/") && String(input).endsWith("/trigger"));
     expect(saveCalls).toHaveLength(0);
     expect(triggerCalls).toHaveLength(0);
+  });
+
+  it("keeps activation enabled for self-hosted Honcho without an API key secret", async () => {
+    installFetchStub({
+      configJsonOverrides: {
+        honchoApiKeySecretRef: "",
+      },
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    fireEvent.change(screen.getByLabelText("Deployment"), {
+      target: { value: "self-hosted" },
+    });
+
+    const baseUrlLabel = screen.getByText("Honcho API base URL").closest("label");
+    const baseUrlInput = baseUrlLabel?.querySelector("input") as HTMLInputElement | null;
+    if (!baseUrlInput) {
+      throw new Error("expected Honcho API base URL input to be rendered");
+    }
+    fireEvent.change(baseUrlInput, {
+      target: { value: "http://127.0.0.1:8000" },
+    });
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Initialize Honcho memory" }) as HTMLButtonElement).disabled).toBe(false);
+    });
   });
 
   it("preserves hidden prompt-context config when applying the recommended profile", async () => {

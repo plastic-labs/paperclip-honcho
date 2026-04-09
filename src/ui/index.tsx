@@ -50,11 +50,6 @@ const primaryButtonStyle: React.CSSProperties = {
   color: "white",
 };
 
-const mutedButtonStyle: React.CSSProperties = {
-  ...buttonStyle,
-  background: "rgba(15, 23, 42, 0.04)",
-};
-
 const inputStyle: React.CSSProperties = {
   width: "100%",
   border: "1px solid rgba(15, 23, 42, 0.12)",
@@ -127,14 +122,9 @@ type CompanyRecord = {
   issuePrefix?: string | null;
 };
 
-type ActionGroupKey = "core" | "advanced";
-
-type SettingsAction = {
-  key: string;
+type ActivationStep = {
+  errorLabel: string;
   label: string;
-  group: ActionGroupKey;
-  disabled: boolean;
-  variant?: "default" | "muted";
   run: () => Promise<void>;
 };
 
@@ -155,10 +145,32 @@ function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   });
 }
 
+function formatUnknownError(nextError: unknown): string {
+  if (nextError instanceof Error) return nextError.message;
+  if (nextError && typeof nextError === "object") {
+    const message = "message" in nextError ? nextError.message : undefined;
+    if (typeof message === "string" && message.length > 0) return message;
+    const error = "error" in nextError ? nextError.error : undefined;
+    if (typeof error === "string" && error.length > 0) return error;
+    try {
+      return JSON.stringify(nextError);
+    } catch {
+      return String(nextError);
+    }
+  }
+  return String(nextError);
+}
+
 function validateSettingsBeforePersist(config: SettingsConfig) {
   if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
     throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
   }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 
 function useSettingsConfig() {
@@ -178,7 +190,7 @@ function useSettingsConfig() {
       })
       .catch((nextError) => {
         if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : String(nextError));
+          setError(formatUnknownError(nextError));
         }
       })
       .finally(() => {
@@ -200,7 +212,7 @@ function useSettingsConfig() {
       setConfigJson(nextConfig);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
       throw nextError;
     } finally {
       setSaving(false);
@@ -239,7 +251,7 @@ function useCompanySecrets(companyId: string | null | undefined) {
       setSecrets(result);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
     } finally {
       setLoading(false);
     }
@@ -279,7 +291,7 @@ function usePluginJobs() {
       setJobs(result);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
     } finally {
       setLoading(false);
     }
@@ -597,130 +609,127 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
-  const repairMappings = usePluginAction(ACTION_KEYS.repairMappings);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedActionKey, setSelectedActionKey] = useState<string | null>(null);
+  const [isActivating, setIsActivating] = useState(false);
+  const [activationStepIndex, setActivationStepIndex] = useState<number | null>(null);
+  const [activationStepLabel, setActivationStepLabel] = useState<string | null>(null);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
-  const canInitialize = Boolean(companyId && settings.configJson.honchoApiKeySecretRef);
+  const deploymentMode = getDeploymentMode(settings.configJson);
+  const canRunConnectionActions = deploymentMode === "cloud"
+    ? Boolean(companyId && settings.configJson.honchoApiKeySecretRef)
+    : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
+  const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
+
+  function refreshActivationData() {
+    memoryStatus.refresh();
+    preview.refresh();
+    jobStatus.refresh();
+  }
+
+  async function getCheckpointStatus() {
+    if (!companyId) return null;
+    const result = await hostFetchJson<{ data: MigrationJobStatusData }>(`/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`, {
+      method: "POST",
+      body: JSON.stringify({
+        companyId,
+        params: { companyId },
+      }),
+    });
+    return result.data.checkpoint;
+  }
 
   async function saveSettings() {
     setError(null);
-    await settings.save(settings.configJson);
-    memoryStatus.refresh();
-    setNotice("Settings saved.");
+    setNotice(null);
+    try {
+      await settings.save(settings.configJson);
+      memoryStatus.refresh();
+      setNotice("Settings saved.");
+    } catch (nextError) {
+      setNotice(null);
+      setError(formatUnknownError(nextError));
+      throw nextError;
+    }
   }
 
-  async function runValidation() {
-    setError(null);
+  async function validateCurrentSettings() {
+    validateSettingsBeforePersist(settings.configJson);
     const result = await settings.test(settings.configJson);
-    setNotice(result.valid ? result.message ?? "Configuration is valid." : result.message ?? "Configuration is invalid.");
+    if (!result.valid) {
+      throw new Error(result.message ?? "Configuration is invalid.");
+    }
   }
 
   async function triggerJob(jobKey: string) {
+    await jobs.triggerByKey(jobKey);
+    const timeoutAt = Date.now() + 15_000;
+    while (Date.now() < timeoutAt) {
+      const checkpoint = await getCheckpointStatus();
+      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
+        throw new Error(checkpoint.lastError ?? `Job failed: ${jobKey}`);
+      }
+      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "complete") {
+        refreshActivationData();
+        return;
+      }
+      await sleep(100);
+    }
+    throw new Error(`Timed out waiting for ${jobKey} to complete.`);
+  }
+
+  async function runActivation() {
+    const steps: ActivationStep[] = [
+      {
+        label: "Validating config",
+        errorLabel: "validating config",
+        run: async () => {
+          await validateCurrentSettings();
+          await settings.save(settings.configJson);
+        },
+      },
+      {
+        label: "Testing connection",
+        errorLabel: "testing connection",
+        run: async () => {
+          await testConnection({});
+        },
+      },
+      {
+        label: "Initializing memory",
+        errorLabel: "initializing memory",
+        run: async () => {
+          await triggerJob(JOB_KEYS.initializeMemory);
+        },
+      },
+    ];
+
     setError(null);
     setNotice(null);
+    setIsActivating(true);
     try {
-      await saveSettings();
-      await jobs.triggerByKey(jobKey);
-      memoryStatus.refresh();
-      preview.refresh();
-      jobStatus.refresh();
-      setNotice(`Triggered ${jobKey}.`);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
-    }
-  }
-
-  async function runAction(action: SettingsAction) {
-    setSelectedActionKey(action.key);
-    try {
-      await action.run();
+      for (const [index, step] of steps.entries()) {
+        setActivationStepIndex(index);
+        setActivationStepLabel(step.label);
+        try {
+          await step.run();
+        } catch (nextError) {
+          throw new Error(`Activation failed during ${step.errorLabel}: ${formatUnknownError(nextError)}`);
+        }
+      }
+      refreshActivationData();
+      setNotice("Honcho activation completed.");
     } catch (nextError) {
       setNotice(null);
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
+    } finally {
+      setIsActivating(false);
+      setActivationStepIndex(null);
+      setActivationStepLabel(null);
     }
   }
-
-  const actions: SettingsAction[] = [
-    {
-      key: "save-settings",
-      label: "Save settings",
-      group: "core",
-      disabled: settings.loading || settings.saving,
-      run: saveSettings,
-    },
-    {
-      key: "validate-config",
-      label: "Validate config",
-      group: "core",
-      disabled: settings.loading,
-      run: runValidation,
-    },
-    {
-      key: "test-connection",
-      label: "Test connection",
-      group: "core",
-      disabled: !canInitialize,
-      run: async () => {
-        setError(null);
-        setNotice(null);
-        await testConnection({});
-      },
-    },
-    {
-      key: "initialize-memory",
-      label: "Initialize memory for this company",
-      group: "core",
-      disabled: !canInitialize || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.initializeMemory);
-      },
-    },
-    {
-      key: "migration-scan",
-      label: "Rescan migration sources",
-      group: "advanced",
-      disabled: !companyId || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.migrationScan);
-      },
-    },
-    {
-      key: "migration-import",
-      label: "Import history",
-      group: "advanced",
-      disabled: !companyId || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.migrationImport);
-      },
-    },
-    {
-      key: "repair-mappings",
-      label: "Repair mappings",
-      group: "advanced",
-      disabled: !companyId,
-      run: async () => {
-        if (!companyId) return;
-        try {
-          setError(null);
-          setNotice(null);
-          await repairMappings({ companyId });
-          setNotice("Mappings repaired.");
-          memoryStatus.refresh();
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : String(nextError));
-        }
-      },
-    },
-  ];
-
-  const groupedActions: { key: ActionGroupKey; label: string; actions: SettingsAction[] }[] = [
-    { key: "core", label: "Core actions", actions: actions.filter((action) => action.group === "core") },
-    { key: "advanced", label: "Advanced actions", actions: actions.filter((action) => action.group === "advanced") },
-  ];
 
   return (
     <div style={sectionStyle}>
@@ -784,37 +793,30 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontSize: "1rem", fontWeight: 600 }}>Actions</div>
-        <div style={{ display: "grid", gap: "0.9rem" }}>
-          {groupedActions.map((group) => (
-            <div key={group.key} style={{ display: "grid", gap: "0.45rem" }}>
-              <div style={{ fontSize: "0.82rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#475569" }}>
-                {group.label}
-              </div>
-              <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
-                {group.actions.map((action) => {
-                  const style = selectedActionKey === action.key
-                    ? primaryButtonStyle
-                    : action.variant === "muted"
-                      ? mutedButtonStyle
-                      : buttonStyle;
-                  return (
-                    <button
-                      key={action.key}
-                      style={style}
-                      disabled={action.disabled}
-                      onClick={() => {
-                        void runAction(action);
-                      }}
-                    >
-                      {action.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
+        <div style={{ fontSize: "1rem", fontWeight: 600 }}>Activation</div>
+        <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
+          <button
+            style={buttonStyle}
+            disabled={actionButtonsDisabled}
+            onClick={() => {
+              void saveSettings().catch(() => undefined);
+            }}
+          >
+            Save settings
+          </button>
+          <button
+            style={isActivating ? primaryButtonStyle : buttonStyle}
+            disabled={actionButtonsDisabled || !canRunConnectionActions}
+            onClick={() => {
+              void runActivation();
+            }}
+          >
+            {isActivating ? `${activationStepLabel ?? "Initializing Honcho memory"}...` : "Initialize Honcho memory"}
+          </button>
         </div>
+        {isActivating && activationStepIndex !== null && activationStepLabel ? (
+          <div style={{ color: "#475569" }}>{`Step ${activationStepIndex + 1} of 3: ${activationStepLabel}`}</div>
+        ) : null}
         {notice ? <div style={{ color: "#0f766e" }}>{notice}</div> : null}
         {error || settings.error || jobs.error ? <div style={{ color: "#b91c1c" }}>{error ?? settings.error ?? jobs.error}</div> : null}
       </div>
