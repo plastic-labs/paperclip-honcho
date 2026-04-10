@@ -2,7 +2,7 @@ import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONFIG, JOB_KEYS, ACTION_KEYS, DATA_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES } from "./constants.js";
 
 const PLUGIN_ID = "honcho-ai.paperclip-honcho";
-const PLUGIN_VERSION = "0.1.0";
+const PLUGIN_VERSION = "0.1.1";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,

@@ -1,7 +1,7 @@
 import type { PluginLauncherRegistration } from "@paperclipai/plugin-sdk";
 
 export const PLUGIN_ID = "honcho-ai.paperclip-honcho";
-export const PLUGIN_VERSION = "0.1.0";
+export const PLUGIN_VERSION = "0.1.1";
 export const STATE_NAMESPACE = "honcho";
 export const DEFAULT_WORKSPACE_PREFIX = "paperclip";
 export const HONCHO_V3_PATH = "/v3";
