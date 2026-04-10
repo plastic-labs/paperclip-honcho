@@ -65,7 +65,12 @@ var DEFAULT_CONFIG = {
 
 // src/deployment.ts
 function normalizeBaseUrlForComparison(baseUrl) {
-  return baseUrl.trim().replace(/\/+$/, "");
+  const trimmed = baseUrl.trim();
+  try {
+    return new URL(trimmed).toString().replace(/\/+$/, "");
+  } catch {
+    return trimmed.replace(/\/+$/, "");
+  }
 }
 function isHonchoCloudBaseUrl(baseUrl) {
   return normalizeBaseUrlForComparison(baseUrl) === normalizeBaseUrlForComparison(DEFAULT_CONFIG.honchoApiBaseUrl);
