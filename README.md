@@ -11,30 +11,18 @@ This package targets the current public/latest Paperclip host surface. It suppor
 3. Enter `@honcho-ai/paperclip-honcho`.
 4. Complete the install from the Paperclip UI.
 
-For local development from a checkout:
-
-```bash
-pnpm build
-pnpm paperclipai plugin install /absolute/path/to/paperclip-honcho
-```
-
 ## Quick Setup
 
 ### Minimal Path
 
 1. Create a Paperclip secret containing the Honcho API key.
-   - For self-hosted or local Honcho, use whatever credential your local startup expects.
-   - If your local dev setup does not require an API key, you can leave `honchoApiKey` unset.
+   - For normal cloud usage, this is required.
+   - Local development does not require a Honcho API key, however, is currently discouraged because of the host repository not being able to reach `localhost` reliably. This can be fixed via a tunnel to the port Honcho runs on. 
 2. Open the Honcho plugin settings page in Paperclip.
-3. If you are using Honcho Cloud, leave the deployment on the default cloud setting.
-4. If you are using a self-hosted or local Honcho instance, switch the deployment to `Self-hosted / local` and set `honchoApiBaseUrl`.
-5. Set `honchoApiKey`.
-6. Click `Save settings`.
-7. Click `Initialize Honcho memory`.
-
-`honchoApiKey` is the only field required for the standard cloud setup path. `honchoApiBaseUrl` is the only field required if you are running Honcho locally. The other settings already have defaults.
-
-If you use a self-hosted or local Honcho deployment, `honchoApiBaseUrl` must be reachable from the Paperclip host runtime. If Paperclip is running in Docker, `localhost` may not point at your machine.
+3. If you are using a self-hosted or local Honcho instance, switch the deployment to `Self-hosted / local` and set the base URL.
+4. Select the API key secret.
+5. Click `Save settings`.
+6. Click `Initialize Honcho memory`.
 
 ## Multi-Agent Hierarchy
 
@@ -82,7 +70,7 @@ The current operator flow is intentionally narrow:
 
 | Setting | Default | Use when |
 | --- | --- | --- |
-| `honchoApiKey` | — | Required for cloud-based setups. Points the plugin at the Paperclip secret containing your Honcho API key. |
+| `honchoApiKey` | — | Required for cloud-based setups. Leave it unset for local development. |
 | `honchoApiBaseUrl` | `https://api.honcho.dev` | Override this for self-hosted or non-default Honcho deployments. |
 | `workspacePrefix` | `paperclip` | Change this if you want a different workspace namespace. |
 | `syncIssueComments` | `true` | Turn this off if you do not want comment history imported into Honcho. |
