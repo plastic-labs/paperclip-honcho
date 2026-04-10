@@ -56,14 +56,14 @@ var RUNTIME_LAUNCHERS = [
 ];
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
-  honchoApiKeySecretRef: "",
+  honchoApiKey: "",
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeMe: true,
-  observeOthers: true,
+  observe_me: true,
+  observe_others: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
@@ -108,11 +108,11 @@ var manifest = {
         title: "Honcho API Base URL",
         default: DEFAULT_CONFIG.honchoApiBaseUrl
       },
-      honchoApiKeySecretRef: {
+      honchoApiKey: {
         type: "string",
-        title: "Honcho API Key Secret",
+        title: "Honcho API Key",
         format: "secret-ref",
-        default: DEFAULT_CONFIG.honchoApiKeySecretRef
+        default: DEFAULT_CONFIG.honchoApiKey
       },
       workspacePrefix: {
         type: "string",
@@ -139,15 +139,15 @@ var manifest = {
         title: "Enable Peer Chat Tool",
         default: DEFAULT_CONFIG.enablePeerChat
       },
-      observeMe: {
+      observe_me: {
         type: "boolean",
-        title: "Observe Me",
-        default: DEFAULT_CONFIG.observeMe
+        title: "Observe Current Agent",
+        default: DEFAULT_CONFIG.observe_me
       },
-      observeOthers: {
+      observe_others: {
         type: "boolean",
-        title: "Observe Others",
-        default: DEFAULT_CONFIG.observeOthers
+        title: "Observe Other Participants",
+        default: DEFAULT_CONFIG.observe_others
       },
       noisePatterns: {
         type: "array",

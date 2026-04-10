@@ -1,5 +1,6 @@
 import type { PluginConfigValidationResult, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONFIG } from "./constants.js";
+import { isHonchoCloudBaseUrl } from "./deployment.js";
 import type { HonchoPluginConfig, HonchoResolvedConfig } from "./types.js";
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
@@ -17,19 +18,35 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
     .filter((item) => item.length > 0);
 }
 
+function normalizeConfiguredBaseUrl(value: unknown): string {
+  if (typeof value !== "string") return DEFAULT_CONFIG.honchoApiBaseUrl;
+  return value.trim();
+}
+
 export function resolveConfig(config: HonchoPluginConfig | Record<string, unknown> | null | undefined): HonchoResolvedConfig {
   const input = (config ?? {}) as HonchoPluginConfig;
-  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeMe);
+  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observe_me);
   return {
-    honchoApiBaseUrl: normalizeString(input.honchoApiBaseUrl, DEFAULT_CONFIG.honchoApiBaseUrl) || DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKeySecretRef: normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKeySecretRef),
+    honchoApiBaseUrl: normalizeConfiguredBaseUrl(input.honchoApiBaseUrl),
+    honchoApiKey: normalizeString(
+      input.honchoApiKey,
+      normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKey),
+    ),
     workspacePrefix: normalizeString(input.workspacePrefix, DEFAULT_CONFIG.workspacePrefix) || DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: normalizeBoolean(input.syncIssueComments, DEFAULT_CONFIG.syncIssueComments),
     syncIssueDocuments: normalizeBoolean(input.syncIssueDocuments, DEFAULT_CONFIG.syncIssueDocuments),
     enablePromptContext: normalizeBoolean(input.enablePromptContext, DEFAULT_CONFIG.enablePromptContext),
     enablePeerChat: normalizeBoolean(input.enablePeerChat, DEFAULT_CONFIG.enablePeerChat),
-    observeMe: typeof input.observeMe === "boolean" ? input.observeMe : legacyObserveAgentPeers,
-    observeOthers: typeof input.observeOthers === "boolean" ? input.observeOthers : legacyObserveAgentPeers,
+    observe_me: typeof input.observe_me === "boolean"
+      ? input.observe_me
+      : typeof input.observeMe === "boolean"
+        ? input.observeMe
+        : legacyObserveAgentPeers,
+    observe_others: typeof input.observe_others === "boolean"
+      ? input.observe_others
+      : typeof input.observeOthers === "boolean"
+        ? input.observeOthers
+        : legacyObserveAgentPeers,
     noisePatterns: normalizeStringArray(input.noisePatterns, DEFAULT_CONFIG.noisePatterns),
     disableDefaultNoisePatterns: normalizeBoolean(input.disableDefaultNoisePatterns, DEFAULT_CONFIG.disableDefaultNoisePatterns),
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),
@@ -59,8 +76,8 @@ export function validateConfig(config: HonchoPluginConfig | Record<string, unkno
     }
   }
 
-  if (!resolved.honchoApiKeySecretRef) {
-    errors.push("Honcho API key secret ref is required");
+  if (isHonchoCloudBaseUrl(resolved.honchoApiBaseUrl) && !resolved.honchoApiKey) {
+    errors.push("Honcho API key is required");
   }
 
   if (!resolved.syncIssueComments && !resolved.syncIssueDocuments) {

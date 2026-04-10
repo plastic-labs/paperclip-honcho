@@ -49,33 +49,41 @@ var RUNTIME_LAUNCHERS = [
 ];
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
-  honchoApiKeySecretRef: "",
+  honchoApiKey: "",
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeMe: true,
-  observeOthers: true,
+  observe_me: true,
+  observe_others: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
   flushBeforeReset: false
 };
 
+// src/deployment.ts
+function normalizeBaseUrlForComparison(baseUrl) {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+function isHonchoCloudBaseUrl(baseUrl) {
+  return normalizeBaseUrlForComparison(baseUrl) === normalizeBaseUrlForComparison(DEFAULT_CONFIG.honchoApiBaseUrl);
+}
+
 // src/ui/settings-config.ts
 function normalizeSettingsConfig(configJson) {
   const source = configJson ?? {};
   return {
     honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() : DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKeySecretRef: typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKeySecretRef,
+    honchoApiKey: typeof source.honchoApiKey === "string" ? source.honchoApiKey.trim() : typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef.trim() : DEFAULT_CONFIG.honchoApiKey,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
     syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
     enablePromptContext: typeof source.enablePromptContext === "boolean" ? source.enablePromptContext : DEFAULT_CONFIG.enablePromptContext,
     enablePeerChat: typeof source.enablePeerChat === "boolean" ? source.enablePeerChat : DEFAULT_CONFIG.enablePeerChat,
-    observeMe: typeof source.observeMe === "boolean" ? source.observeMe : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeMe,
-    observeOthers: typeof source.observeOthers === "boolean" ? source.observeOthers : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observeOthers,
+    observe_me: typeof source.observe_me === "boolean" ? source.observe_me : typeof source.observeMe === "boolean" ? source.observeMe : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observe_me,
+    observe_others: typeof source.observe_others === "boolean" ? source.observe_others : typeof source.observeOthers === "boolean" ? source.observeOthers : typeof source.observeAgentPeers === "boolean" ? source.observeAgentPeers : DEFAULT_CONFIG.observe_others,
     noisePatterns: Array.isArray(source.noisePatterns) ? source.noisePatterns.filter((value) => typeof value === "string") : [...DEFAULT_CONFIG.noisePatterns],
     disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
     stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
@@ -83,7 +91,7 @@ function normalizeSettingsConfig(configJson) {
   };
 }
 function getDeploymentMode(config) {
-  return config.honchoApiBaseUrl === DEFAULT_CONFIG.honchoApiBaseUrl ? "cloud" : "self-hosted";
+  return isHonchoCloudBaseUrl(config.honchoApiBaseUrl) ? "cloud" : "self-hosted";
 }
 
 // src/ui/index.tsx
@@ -118,10 +126,6 @@ var primaryButtonStyle = {
   ...buttonStyle,
   background: "#0f172a",
   color: "white"
-};
-var mutedButtonStyle = {
-  ...buttonStyle,
-  background: "rgba(15, 23, 42, 0.04)"
 };
 var inputStyle = {
   width: "100%",
@@ -185,10 +189,30 @@ function hostFetchJson(path, init) {
     return await response.json();
   });
 }
+function formatUnknownError(nextError) {
+  if (nextError instanceof Error) return nextError.message;
+  if (nextError && typeof nextError === "object") {
+    const message = "message" in nextError ? nextError.message : void 0;
+    if (typeof message === "string" && message.length > 0) return message;
+    const error = "error" in nextError ? nextError.error : void 0;
+    if (typeof error === "string" && error.length > 0) return error;
+    try {
+      return JSON.stringify(nextError);
+    } catch {
+      return String(nextError);
+    }
+  }
+  return String(nextError);
+}
 function validateSettingsBeforePersist(config) {
   if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
     throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
   }
+}
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
 }
 function useSettingsConfig() {
   const [configJson, setConfigJson] = useState({ ...DEFAULT_CONFIG });
@@ -204,7 +228,7 @@ function useSettingsConfig() {
       setError(null);
     }).catch((nextError) => {
       if (!cancelled) {
-        setError(nextError instanceof Error ? nextError.message : String(nextError));
+        setError(formatUnknownError(nextError));
       }
     }).finally(() => {
       if (!cancelled) setLoading(false);
@@ -224,7 +248,7 @@ function useSettingsConfig() {
       setConfigJson(nextConfig);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
       throw nextError;
     } finally {
       setSaving(false);
@@ -259,7 +283,7 @@ function useCompanySecrets(companyId) {
       setSecrets(result);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
     } finally {
       setLoading(false);
     }
@@ -294,7 +318,7 @@ function usePluginJobs() {
       setJobs(result);
       setError(null);
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
     } finally {
       setLoading(false);
     }
@@ -423,14 +447,14 @@ function SecretSection(props) {
     ] }),
     /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
       /* @__PURE__ */ jsxs("span", { style: labelHeaderStyle, children: [
-        /* @__PURE__ */ jsx("span", { children: "Honcho API key secret" }),
+        /* @__PURE__ */ jsx("span", { children: "Honcho API Key" }),
         deploymentMode === "self-hosted" ? /* @__PURE__ */ jsx("span", { style: optionalTagStyle, children: "Optional" }) : null
       ] }),
       /* @__PURE__ */ jsxs(
         "select",
         {
-          value: props.config.honchoApiKeySecretRef,
-          onChange: (event) => props.onConfigChange({ honchoApiKeySecretRef: event.target.value }),
+          value: props.config.honchoApiKey,
+          onChange: (event) => props.onConfigChange({ honchoApiKey: event.target.value }),
           style: selectStyle,
           children: [
             /* @__PURE__ */ jsx("option", { value: "", children: "Select a Paperclip secret\u2026" }),
@@ -485,7 +509,7 @@ function SecretSection(props) {
           disabled: !props.companyId || !draft.value.trim() || creating,
           onClick: async () => {
             const created = await createSecret(draft);
-            props.onConfigChange({ honchoApiKeySecretRef: created.id });
+            props.onConfigChange({ honchoApiKey: created.id });
             setDraft((current) => ({ ...current, value: "" }));
             setDraftOpen(false);
           },
@@ -512,8 +536,8 @@ function SyncProfileSection(props) {
       ["Sync issue comments", props.config.syncIssueComments, "syncIssueComments"],
       ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
       ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
-      ["Observe me", props.config.observeMe, "observeMe"],
-      ["Observe others", props.config.observeOthers, "observeOthers"]
+      ["observe_me", props.config.observe_me, "observe_me"],
+      ["observe_others", props.config.observe_others, "observe_others"]
     ].map(([label, checked, key]) => /* @__PURE__ */ jsxs("label", { style: { display: "flex", alignItems: "center", gap: "0.55rem" }, children: [
       /* @__PURE__ */ jsx(
         "input",
@@ -577,123 +601,117 @@ function HonchoSettingsPage({ context }) {
   const preview = usePluginData(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
-  const repairMappings = usePluginAction(ACTION_KEYS.repairMappings);
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
-  const [selectedActionKey, setSelectedActionKey] = useState(null);
+  const [isActivating, setIsActivating] = useState(false);
+  const [activationStepIndex, setActivationStepIndex] = useState(null);
+  const [activationStepLabel, setActivationStepLabel] = useState(null);
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
-  const canInitialize = Boolean(companyId && settings.configJson.honchoApiKeySecretRef);
-  async function saveSettings() {
-    setError(null);
-    await settings.save(settings.configJson);
+  const deploymentMode = getDeploymentMode(settings.configJson);
+  const canRunConnectionActions = deploymentMode === "cloud" ? Boolean(companyId && settings.configJson.honchoApiKey) : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
+  const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
+  function refreshActivationData() {
     memoryStatus.refresh();
-    setNotice("Settings saved.");
+    preview.refresh();
+    jobStatus.refresh();
   }
-  async function runValidation() {
-    setError(null);
-    const result = await settings.test(settings.configJson);
-    setNotice(result.valid ? result.message ?? "Configuration is valid." : result.message ?? "Configuration is invalid.");
+  async function getCheckpointStatus() {
+    if (!companyId) return null;
+    const result = await hostFetchJson(`/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`, {
+      method: "POST",
+      body: JSON.stringify({
+        companyId,
+        params: { companyId }
+      })
+    });
+    return result.data.checkpoint;
   }
-  async function triggerJob(jobKey) {
+  async function saveSettings() {
     setError(null);
     setNotice(null);
     try {
-      await saveSettings();
-      await jobs.triggerByKey(jobKey);
+      await settings.save(settings.configJson);
       memoryStatus.refresh();
-      preview.refresh();
-      jobStatus.refresh();
-      setNotice(`Triggered ${jobKey}.`);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
-    }
-  }
-  async function runAction(action) {
-    setSelectedActionKey(action.key);
-    try {
-      await action.run();
+      setNotice("Settings saved.");
     } catch (nextError) {
       setNotice(null);
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(formatUnknownError(nextError));
+      throw nextError;
     }
   }
-  const actions = [
-    {
-      key: "save-settings",
-      label: "Save settings",
-      group: "core",
-      disabled: settings.loading || settings.saving,
-      run: saveSettings
-    },
-    {
-      key: "validate-config",
-      label: "Validate config",
-      group: "core",
-      disabled: settings.loading,
-      run: runValidation
-    },
-    {
-      key: "test-connection",
-      label: "Test connection",
-      group: "core",
-      disabled: !canInitialize,
-      run: async () => {
-        setError(null);
-        setNotice(null);
-        await testConnection({});
+  async function validateCurrentSettings() {
+    validateSettingsBeforePersist(settings.configJson);
+    const result = await settings.test(settings.configJson);
+    if (!result.valid) {
+      throw new Error(result.message ?? "Configuration is invalid.");
+    }
+  }
+  async function triggerJob(jobKey) {
+    await jobs.triggerByKey(jobKey);
+    const timeoutAt = Date.now() + 5 * 6e4;
+    while (Date.now() < timeoutAt) {
+      const checkpoint = await getCheckpointStatus();
+      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
+        throw new Error(checkpoint.lastError ?? `Job failed: ${jobKey}`);
       }
-    },
-    {
-      key: "initialize-memory",
-      label: "Initialize memory for this company",
-      group: "core",
-      disabled: !canInitialize || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.initializeMemory);
+      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "complete") {
+        refreshActivationData();
+        return;
       }
-    },
-    {
-      key: "migration-scan",
-      label: "Rescan migration sources",
-      group: "advanced",
-      disabled: !companyId || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.migrationScan);
-      }
-    },
-    {
-      key: "migration-import",
-      label: "Import history",
-      group: "advanced",
-      disabled: !companyId || jobs.loading,
-      run: async () => {
-        await triggerJob(JOB_KEYS.migrationImport);
-      }
-    },
-    {
-      key: "repair-mappings",
-      label: "Repair mappings",
-      group: "advanced",
-      disabled: !companyId,
-      run: async () => {
-        if (!companyId) return;
-        try {
-          setError(null);
-          setNotice(null);
-          await repairMappings({ companyId });
-          setNotice("Mappings repaired.");
-          memoryStatus.refresh();
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : String(nextError));
+      await sleep(1e3);
+    }
+    throw new Error(`Timed out waiting for ${jobKey} to complete.`);
+  }
+  async function runActivation() {
+    const steps = [
+      {
+        label: "Validating config",
+        errorLabel: "validating config",
+        run: async () => {
+          await validateCurrentSettings();
+          await settings.save(settings.configJson);
+        }
+      },
+      {
+        label: "Testing connection",
+        errorLabel: "testing connection",
+        run: async () => {
+          await testConnection({});
+        }
+      },
+      {
+        label: "Initializing memory",
+        errorLabel: "initializing memory",
+        run: async () => {
+          await triggerJob(JOB_KEYS.initializeMemory);
         }
       }
+    ];
+    setError(null);
+    setNotice(null);
+    setIsActivating(true);
+    try {
+      for (const [index, step] of steps.entries()) {
+        setActivationStepIndex(index);
+        setActivationStepLabel(step.label);
+        try {
+          await step.run();
+        } catch (nextError) {
+          throw new Error(`Activation failed during ${step.errorLabel}: ${formatUnknownError(nextError)}`);
+        }
+      }
+      refreshActivationData();
+      setNotice("Honcho activation completed.");
+    } catch (nextError) {
+      setNotice(null);
+      setError(formatUnknownError(nextError));
+    } finally {
+      setIsActivating(false);
+      setActivationStepIndex(null);
+      setActivationStepLabel(null);
     }
-  ];
-  const groupedActions = [
-    { key: "core", label: "Core actions", actions: actions.filter((action) => action.group === "core") },
-    { key: "advanced", label: "Advanced actions", actions: actions.filter((action) => action.group === "advanced") }
-  ];
+  }
   return /* @__PURE__ */ jsxs("div", { style: sectionStyle, children: [
     /* @__PURE__ */ jsxs("div", { style: heroStyle, children: [
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.4rem" }, children: [
@@ -751,25 +769,32 @@ function HonchoSettingsPage({ context }) {
       /* @__PURE__ */ jsx(Row, { label: "Warnings", value: preview.data?.warnings?.join("; ") || "None" })
     ] }),
     /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
-      /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Actions" }),
-      /* @__PURE__ */ jsx("div", { style: { display: "grid", gap: "0.9rem" }, children: groupedActions.map((group) => /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.45rem" }, children: [
-        /* @__PURE__ */ jsx("div", { style: { fontSize: "0.82rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "#475569" }, children: group.label }),
-        /* @__PURE__ */ jsx("div", { style: { display: "flex", gap: "0.65rem", flexWrap: "wrap" }, children: group.actions.map((action) => {
-          const style = selectedActionKey === action.key ? primaryButtonStyle : action.variant === "muted" ? mutedButtonStyle : buttonStyle;
-          return /* @__PURE__ */ jsx(
-            "button",
-            {
-              style,
-              disabled: action.disabled,
-              onClick: () => {
-                void runAction(action);
-              },
-              children: action.label
+      /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Activation" }),
+      /* @__PURE__ */ jsxs("div", { style: { display: "flex", gap: "0.65rem", flexWrap: "wrap" }, children: [
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            style: buttonStyle,
+            disabled: actionButtonsDisabled,
+            onClick: () => {
+              void saveSettings().catch(() => void 0);
             },
-            action.key
-          );
-        }) })
-      ] }, group.key)) }),
+            children: "Save settings"
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            style: isActivating ? primaryButtonStyle : buttonStyle,
+            disabled: actionButtonsDisabled || !canRunConnectionActions,
+            onClick: () => {
+              void runActivation();
+            },
+            children: isActivating ? `${activationStepLabel ?? "Initializing Honcho memory"}...` : "Initialize Honcho memory"
+          }
+        )
+      ] }),
+      isActivating && activationStepIndex !== null && activationStepLabel ? /* @__PURE__ */ jsx("div", { style: { color: "#475569" }, children: `Step ${activationStepIndex + 1} of 3: ${activationStepLabel}` }) : null,
       notice ? /* @__PURE__ */ jsx("div", { style: { color: "#0f766e" }, children: notice }) : null,
       error || settings.error || jobs.error ? /* @__PURE__ */ jsx("div", { style: { color: "#b91c1c" }, children: error ?? settings.error ?? jobs.error }) : null
     ] })

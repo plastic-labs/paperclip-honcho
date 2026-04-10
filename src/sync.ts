@@ -949,7 +949,7 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
       workspaceStatus: "created",
       peerStatus: counts.mappedPeers > 0 ? "complete" : "partial",
       initializationStatus: "complete",
-      migrationStatus: preview.estimatedMessages > 0 ? "complete" : "preview_ready",
+      migrationStatus: "complete",
       promptContextStatus: probe.status,
       lastSuccessfulSyncAt: new Date().toISOString(),
       lastError: null,
@@ -1123,8 +1123,8 @@ export async function loadIssueStatusData(ctx: PluginContext, issueId: string, c
       syncIssueDocuments: config.syncIssueDocuments,
       enablePromptContext: config.enablePromptContext,
       enablePeerChat: config.enablePeerChat,
-      observeMe: config.observeMe,
-      observeOthers: config.observeOthers,
+      observe_me: config.observe_me,
+      observe_others: config.observe_others,
     },
   };
 }

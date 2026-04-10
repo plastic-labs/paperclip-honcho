@@ -1,5 +1,6 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
+import { isHonchoCloudBaseUrl } from "./deployment.js";
 import { peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "./ids.js";
 import type {
   AskPeerParams,
@@ -110,16 +111,21 @@ function buildRepresentationPreview(payload: HonchoRepresentationResult): string
 async function requestJson(
   ctx: PluginContext,
   config: HonchoResolvedConfig,
-  apiKey: string,
+  apiKey: string | null,
   pathname: string,
   init: RequestInit,
 ): Promise<JsonRecord> {
   for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt += 1) {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+    };
+    if (apiKey) {
+      headers.authorization = `Bearer ${apiKey}`;
+    }
     const res = await ctx.http.fetch(joinUrl(config.honchoApiBaseUrl, pathname), {
       ...init,
       headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+        ...headers,
         ...(init.headers ?? {}),
       },
     });
@@ -154,12 +160,12 @@ async function requestJson(
 export class HonchoClient {
   private readonly ctx: PluginContext;
   private readonly config: HonchoResolvedConfig;
-  private readonly apiKey: string;
+  private readonly apiKey: string | null;
   private readonly ensuredWorkspaces = new Set<string>();
   private readonly ensuredSessions = new Set<string>();
   private readonly ensuredPeers = new Set<string>();
 
-  constructor(input: HonchoClientInput & { apiKey: string }) {
+  constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
     this.config = input.config;
     this.apiKey = input.apiKey;
@@ -259,8 +265,8 @@ export class HonchoClient {
         agent_title: agent.title,
       },
       {
-        observe_me: this.config.observeMe,
-        observe_others: this.config.observeOthers,
+        observe_me: this.config.observe_me,
+        observe_others: this.config.observe_others,
       },
     );
   }
@@ -452,8 +458,8 @@ export class HonchoClient {
         company_id: companyId,
         agent_id: agentId,
       }, {
-        observe_me: this.config.observeMe,
-        observe_others: this.config.observeOthers,
+        observe_me: this.config.observe_me,
+        observe_others: this.config.observe_others,
       });
     }
     const workspaceId = this.workspaceId(companyId);
@@ -514,6 +520,8 @@ export class HonchoClient {
 }
 
 export async function createHonchoClient(input: HonchoClientInput): Promise<HonchoClient> {
-  const apiKey = await input.ctx.secrets.resolve(input.config.honchoApiKeySecretRef);
+  const apiKey = input.config.honchoApiKey
+    ? await input.ctx.secrets.resolve(input.config.honchoApiKey)
+    : null;
   return new HonchoClient({ ...input, apiKey });
 }

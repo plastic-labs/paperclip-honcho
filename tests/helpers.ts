@@ -12,14 +12,14 @@ import type { DocumentRevision } from "../src/types.js";
 
 export const BASE_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
-  honchoApiKeySecretRef: "HONCHO_API_KEY",
+  honchoApiKey: "HONCHO_API_KEY",
   workspacePrefix: "paperclip",
   syncIssueComments: true,
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeMe: true,
-  observeOthers: true,
+  observe_me: true,
+  observe_others: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
@@ -57,6 +57,7 @@ export type StandaloneIssueDocument = {
 export type CapturedRequest = {
   url: string;
   method: string;
+  headers: Record<string, string>;
   body: Record<string, unknown> | null;
 };
 
@@ -83,6 +84,33 @@ function parseBody(body: BodyInit | null | undefined): Record<string, unknown> |
   }
 }
 
+function parseHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  if (!headers) return {};
+  const normalized: Record<string, string> = {};
+  const assignHeader = (key: string, value: string) => {
+    normalized[key.toLowerCase()] = value;
+  };
+
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => assignHeader(key, value));
+    return normalized;
+  }
+
+  if (Array.isArray(headers)) {
+    for (const [key, value] of headers) {
+      assignHeader(key, value);
+    }
+    return normalized;
+  }
+
+  for (const [key, value] of Object.entries(headers)) {
+    if (typeof value === "string") {
+      assignHeader(key, value);
+    }
+  }
+  return normalized;
+}
+
 export function installFetchMock(options: FetchMockOptions = {}) {
   const requests: CapturedRequest[] = [];
   const remainingFailOnce = new Map<string | RegExp, number>(
@@ -96,6 +124,7 @@ export function installFetchMock(options: FetchMockOptions = {}) {
     requests.push({
       url,
       method: init?.method ?? "GET",
+      headers: parseHeaders(init?.headers),
       body: parseBody(init?.body),
     });
 

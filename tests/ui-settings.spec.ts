@@ -6,7 +6,7 @@ describe("settings UI config helpers", () => {
   it("preserves a saved custom Honcho base URL", () => {
     const resolved = normalizeSettingsConfig({
       honchoApiBaseUrl: " http://127.0.0.1:8000/ ",
-      honchoApiKeySecretRef: "HONCHO_API_KEY",
+      honchoApiKey: "HONCHO_API_KEY",
     });
 
     expect(resolved.honchoApiBaseUrl).toBe("http://127.0.0.1:8000/");
@@ -15,7 +15,7 @@ describe("settings UI config helpers", () => {
   it("preserves an explicitly empty Honcho base URL for self-hosted validation", () => {
     const resolved = normalizeSettingsConfig({
       honchoApiBaseUrl: "   ",
-      honchoApiKeySecretRef: "HONCHO_API_KEY",
+      honchoApiKey: "HONCHO_API_KEY",
     });
 
     expect(resolved.honchoApiBaseUrl).toBe("");
@@ -31,9 +31,29 @@ describe("settings UI config helpers", () => {
   it("treats a non-default base URL as self-hosted or local", () => {
     const resolved = normalizeSettingsConfig({
       honchoApiBaseUrl: "http://host.docker.internal:8000",
-      honchoApiKeySecretRef: "HONCHO_API_KEY",
+      honchoApiKey: "HONCHO_API_KEY",
     });
 
     expect(getDeploymentMode(resolved)).toBe("self-hosted");
+  });
+
+  it("normalizes the renamed public config keys while accepting legacy aliases", () => {
+    const renamed = normalizeSettingsConfig({
+      honchoApiKey: " HONCHO_API_KEY ",
+      observe_me: false,
+      observe_others: true,
+    });
+    const legacy = normalizeSettingsConfig({
+      honchoApiKeySecretRef: " LEGACY_KEY ",
+      observeMe: false,
+      observeOthers: true,
+    });
+
+    expect(renamed.honchoApiKey).toBe("HONCHO_API_KEY");
+    expect(renamed.observe_me).toBe(false);
+    expect(renamed.observe_others).toBe(true);
+    expect(legacy.honchoApiKey).toBe("LEGACY_KEY");
+    expect(legacy.observe_me).toBe(false);
+    expect(legacy.observe_others).toBe(true);
   });
 });

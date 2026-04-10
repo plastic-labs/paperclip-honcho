@@ -6839,14 +6839,14 @@ var RUNTIME_LAUNCHERS = [
 ];
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
-  honchoApiKeySecretRef: "",
+  honchoApiKey: "",
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
   enablePromptContext: false,
   enablePeerChat: true,
-  observeMe: true,
-  observeOthers: true,
+  observe_me: true,
+  observe_others: true,
   noisePatterns: [],
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
@@ -6894,11 +6894,11 @@ var manifest = {
         title: "Honcho API Base URL",
         default: DEFAULT_CONFIG.honchoApiBaseUrl
       },
-      honchoApiKeySecretRef: {
+      honchoApiKey: {
         type: "string",
-        title: "Honcho API Key Secret",
+        title: "Honcho API Key",
         format: "secret-ref",
-        default: DEFAULT_CONFIG.honchoApiKeySecretRef
+        default: DEFAULT_CONFIG.honchoApiKey
       },
       workspacePrefix: {
         type: "string",
@@ -6925,15 +6925,15 @@ var manifest = {
         title: "Enable Peer Chat Tool",
         default: DEFAULT_CONFIG.enablePeerChat
       },
-      observeMe: {
+      observe_me: {
         type: "boolean",
-        title: "Observe Me",
-        default: DEFAULT_CONFIG.observeMe
+        title: "Observe Current Agent",
+        default: DEFAULT_CONFIG.observe_me
       },
-      observeOthers: {
+      observe_others: {
         type: "boolean",
-        title: "Observe Others",
-        default: DEFAULT_CONFIG.observeOthers
+        title: "Observe Other Participants",
+        default: DEFAULT_CONFIG.observe_others
       },
       noisePatterns: {
         type: "array",
@@ -7131,6 +7131,14 @@ var manifest = {
 };
 var manifest_default = manifest;
 
+// src/deployment.ts
+function normalizeBaseUrlForComparison(baseUrl) {
+  return baseUrl.trim().replace(/\/+$/, "");
+}
+function isHonchoCloudBaseUrl(baseUrl) {
+  return normalizeBaseUrlForComparison(baseUrl) === normalizeBaseUrlForComparison(DEFAULT_CONFIG.honchoApiBaseUrl);
+}
+
 // src/config.ts
 function normalizeBoolean(value, fallback) {
   return typeof value === "boolean" ? value : fallback;
@@ -7142,19 +7150,26 @@ function normalizeStringArray(value, fallback) {
   if (!Array.isArray(value)) return [...fallback];
   return value.map((item) => typeof item === "string" ? item.trim() : "").filter((item) => item.length > 0);
 }
+function normalizeConfiguredBaseUrl(value) {
+  if (typeof value !== "string") return DEFAULT_CONFIG.honchoApiBaseUrl;
+  return value.trim();
+}
 function resolveConfig(config) {
   const input = config ?? {};
-  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observeMe);
+  const legacyObserveAgentPeers = normalizeBoolean(input.observeAgentPeers, DEFAULT_CONFIG.observe_me);
   return {
-    honchoApiBaseUrl: normalizeString(input.honchoApiBaseUrl, DEFAULT_CONFIG.honchoApiBaseUrl) || DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKeySecretRef: normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKeySecretRef),
+    honchoApiBaseUrl: normalizeConfiguredBaseUrl(input.honchoApiBaseUrl),
+    honchoApiKey: normalizeString(
+      input.honchoApiKey,
+      normalizeString(input.honchoApiKeySecretRef, DEFAULT_CONFIG.honchoApiKey)
+    ),
     workspacePrefix: normalizeString(input.workspacePrefix, DEFAULT_CONFIG.workspacePrefix) || DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: normalizeBoolean(input.syncIssueComments, DEFAULT_CONFIG.syncIssueComments),
     syncIssueDocuments: normalizeBoolean(input.syncIssueDocuments, DEFAULT_CONFIG.syncIssueDocuments),
     enablePromptContext: normalizeBoolean(input.enablePromptContext, DEFAULT_CONFIG.enablePromptContext),
     enablePeerChat: normalizeBoolean(input.enablePeerChat, DEFAULT_CONFIG.enablePeerChat),
-    observeMe: typeof input.observeMe === "boolean" ? input.observeMe : legacyObserveAgentPeers,
-    observeOthers: typeof input.observeOthers === "boolean" ? input.observeOthers : legacyObserveAgentPeers,
+    observe_me: typeof input.observe_me === "boolean" ? input.observe_me : typeof input.observeMe === "boolean" ? input.observeMe : legacyObserveAgentPeers,
+    observe_others: typeof input.observe_others === "boolean" ? input.observe_others : typeof input.observeOthers === "boolean" ? input.observeOthers : legacyObserveAgentPeers,
     noisePatterns: normalizeStringArray(input.noisePatterns, DEFAULT_CONFIG.noisePatterns),
     disableDefaultNoisePatterns: normalizeBoolean(input.disableDefaultNoisePatterns, DEFAULT_CONFIG.disableDefaultNoisePatterns),
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),
@@ -7180,8 +7195,8 @@ function validateConfig(config) {
       errors.push("Honcho base URL must be a valid URL");
     }
   }
-  if (!resolved.honchoApiKeySecretRef) {
-    errors.push("Honcho API key secret ref is required");
+  if (isHonchoCloudBaseUrl(resolved.honchoApiBaseUrl) && !resolved.honchoApiKey) {
+    errors.push("Honcho API key is required");
   }
   if (!resolved.syncIssueComments && !resolved.syncIssueDocuments) {
     warnings.push("Both syncIssueComments and syncIssueDocuments are disabled; the plugin will only serve connection checks and on-demand tools.");
@@ -7322,11 +7337,16 @@ function buildRepresentationPreview(payload) {
 }
 async function requestJson(ctx, config, apiKey, pathname, init) {
   for (let attempt = 0; attempt <= RATE_LIMIT_MAX_RETRIES; attempt += 1) {
+    const headers = {
+      "content-type": "application/json"
+    };
+    if (apiKey) {
+      headers.authorization = `Bearer ${apiKey}`;
+    }
     const res = await ctx.http.fetch(joinUrl(config.honchoApiBaseUrl, pathname), {
       ...init,
       headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${apiKey}`,
+        ...headers,
         ...init.headers ?? {}
       }
     });
@@ -7447,8 +7467,8 @@ var HonchoClient = class {
         agent_title: agent.title
       },
       {
-        observe_me: this.config.observeMe,
-        observe_others: this.config.observeOthers
+        observe_me: this.config.observe_me,
+        observe_others: this.config.observe_others
       }
     );
   }
@@ -7609,8 +7629,8 @@ var HonchoClient = class {
         company_id: companyId,
         agent_id: agentId
       }, {
-        observe_me: this.config.observeMe,
-        observe_others: this.config.observeOthers
+        observe_me: this.config.observe_me,
+        observe_others: this.config.observe_others
       });
     }
     const workspaceId = this.workspaceId(companyId);
@@ -7668,7 +7688,7 @@ var HonchoClient = class {
   }
 };
 async function createHonchoClient(input) {
-  const apiKey = await input.ctx.secrets.resolve(input.config.honchoApiKeySecretRef);
+  const apiKey = input.config.honchoApiKey ? await input.ctx.secrets.resolve(input.config.honchoApiKey) : null;
   return new HonchoClient({ ...input, apiKey });
 }
 
@@ -8854,7 +8874,7 @@ async function initializeMemory(ctx, companyId) {
       workspaceStatus: "created",
       peerStatus: counts.mappedPeers > 0 ? "complete" : "partial",
       initializationStatus: "complete",
-      migrationStatus: preview.estimatedMessages > 0 ? "complete" : "preview_ready",
+      migrationStatus: "complete",
       promptContextStatus: probe.status,
       lastSuccessfulSyncAt: (/* @__PURE__ */ new Date()).toISOString(),
       lastError: null,
@@ -9001,8 +9021,8 @@ async function loadIssueStatusData(ctx, issueId, companyId) {
       syncIssueDocuments: config.syncIssueDocuments,
       enablePromptContext: config.enablePromptContext,
       enablePeerChat: config.enablePeerChat,
-      observeMe: config.observeMe,
-      observeOthers: config.observeOthers
+      observe_me: config.observe_me,
+      observe_others: config.observe_others
     }
   };
 }

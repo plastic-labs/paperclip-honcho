@@ -58,13 +58,13 @@ describe("honcho memory jobs", () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
-        honchoApiKeySecretRef: "",
+        honchoApiKey: "",
       },
     });
 
     await plugin.definition.setup(harness.ctx);
 
-    await expect(harness.runJob("initialize-memory")).rejects.toThrow("Honcho API key secret ref is required");
+    await expect(harness.runJob("initialize-memory")).rejects.toThrow("Honcho API key is required");
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -72,10 +72,59 @@ describe("honcho memory jobs", () => {
     expect(status.companyStatus).toMatchObject({
       connectionStatus: "auth_failed",
       initializationStatus: "failed",
-      promptContextStatus: "inactive",
-      pendingFailureCount: 1,
-      lastError: expect.objectContaining({
-        message: expect.stringContaining("Honcho API key secret ref is required"),
+        promptContextStatus: "inactive",
+        pendingFailureCount: 1,
+        lastError: expect.objectContaining({
+        message: expect.stringContaining("Honcho API key is required"),
+      }),
+    });
+  });
+
+  it("initialize-memory works against self-hosted Honcho without an API key secret", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "http://127.0.0.1:8000",
+        honchoApiKey: "",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const status = await harness.getData<Record<string, unknown>>("memory-status", {
+      companyId: "co_1",
+    });
+    expect(status.companyStatus).toMatchObject({
+      connectionStatus: "connected",
+      initializationStatus: "complete",
+    });
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.headers.authorization).toBeUndefined();
+  });
+
+  it("initialize-memory marks migration complete even when there is nothing to import", async () => {
+    installFetchMock();
+    const harness = createHonchoHarness({
+      seed: {
+        issueComments: [],
+        issueDocuments: [],
+        documentRevisions: [],
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const status = await harness.getData<Record<string, unknown>>("memory-status", {
+      companyId: "co_1",
+    });
+    expect(status.companyStatus).toMatchObject({
+      initializationStatus: "complete",
+      migrationStatus: "complete",
+      latestMigrationPreview: expect.objectContaining({
+        estimatedMessages: 0,
       }),
     });
   });
