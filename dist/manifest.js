@@ -72,7 +72,7 @@ var DEFAULT_CONFIG = {
 
 // src/manifest.ts
 var PLUGIN_ID = "honcho-ai.paperclip-honcho";
-var PLUGIN_VERSION = "0.1.0";
+var PLUGIN_VERSION = "0.1.1";
 var manifest = {
   id: PLUGIN_ID,
   apiVersion: 1,
