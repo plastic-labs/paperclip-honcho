@@ -39,12 +39,12 @@ describe("settings UI config helpers", () => {
 
   it("normalizes the renamed public config keys while accepting legacy aliases", () => {
     const renamed = normalizeSettingsConfig({
-      honchoApiKey: "HONCHO_API_KEY",
+      honchoApiKey: " HONCHO_API_KEY ",
       observe_me: false,
       observe_others: true,
     });
     const legacy = normalizeSettingsConfig({
-      honchoApiKeySecretRef: "LEGACY_KEY",
+      honchoApiKeySecretRef: " LEGACY_KEY ",
       observeMe: false,
       observeOthers: true,
     });

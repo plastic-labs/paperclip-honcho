@@ -207,6 +207,7 @@ describe("HonchoSettingsPage", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("removes prompt-context UI from the settings page", async () => {
@@ -307,7 +308,7 @@ describe("HonchoSettingsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Honcho activation completed.")).toBeTruthy();
-    });
+    }, { timeout: 3_000 });
 
     const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
     const initializeTriggerIndex = requestUrls.findIndex((url) => url.includes("/jobs/job_init/trigger"));
@@ -318,6 +319,61 @@ describe("HonchoSettingsPage", () => {
     expect(triggeredJobs).toEqual([
       "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
     ]);
+  });
+
+  it("keeps polling long-running initialization jobs without timing out after 15 seconds", async () => {
+    installFetchStub({
+      migrationJobStatusResponses: [
+        ...Array.from({ length: 20 }, (_, index) => ({
+          activeJobKey: "initialize-memory",
+          status: "running",
+          processed: index,
+          succeeded: index,
+          skipped: 0,
+          failed: 0,
+          currentSourceType: null,
+          currentEntityId: null,
+          lastError: null,
+          updatedAt: `2026-04-09T21:39:${String(index).padStart(2, "0")}.000Z`,
+        })),
+        {
+          activeJobKey: "initialize-memory",
+          status: "complete",
+          processed: 20,
+          succeeded: 20,
+          skipped: 0,
+          failed: 0,
+          currentSourceType: null,
+          currentEntityId: null,
+          lastError: null,
+          updatedAt: "2026-04-09T21:42:20.000Z",
+        },
+      ],
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    vi.useFakeTimers();
+    let nowMs = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      const current = nowMs;
+      nowMs += 1_000;
+      return current;
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const statusPolls = requestUrls.filter((url) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`));
+    expect(statusPolls.length).toBeGreaterThanOrEqual(20);
+    expect(screen.queryByText(/Activation failed during/)).toBeNull();
+    expect(screen.queryByText(/Timed out waiting for initialize-memory to complete\./)).toBeNull();
   });
 
   it("stops activation on the first failure and shows the step-specific error", async () => {

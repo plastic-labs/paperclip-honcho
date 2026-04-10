@@ -520,7 +520,7 @@ export class HonchoClient {
 }
 
 export async function createHonchoClient(input: HonchoClientInput): Promise<HonchoClient> {
-  const apiKey = isHonchoCloudBaseUrl(input.config.honchoApiBaseUrl)
+  const apiKey = input.config.honchoApiKey
     ? await input.ctx.secrets.resolve(input.config.honchoApiKey)
     : null;
   return new HonchoClient({ ...input, apiKey });

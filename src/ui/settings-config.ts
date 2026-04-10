@@ -12,9 +12,9 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
       ? source.honchoApiBaseUrl.trim()
       : DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKey: typeof source.honchoApiKey === "string"
-      ? source.honchoApiKey
+      ? source.honchoApiKey.trim()
       : typeof source.honchoApiKeySecretRef === "string"
-        ? source.honchoApiKeySecretRef
+        ? source.honchoApiKeySecretRef.trim()
         : DEFAULT_CONFIG.honchoApiKey,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,

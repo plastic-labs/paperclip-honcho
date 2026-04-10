@@ -35,6 +35,10 @@ describe("honcho config", () => {
     expect(manifest.ui?.launchers).toEqual(expect.arrayContaining([
       expect.objectContaining({ placementZone: "globalToolbarButton", displayName: "Honcho Memory" }),
     ]));
+    expect(manifest.instanceConfigSchema?.properties).toMatchObject({
+      observe_me: expect.objectContaining({ title: "Observe Current Agent" }),
+      observe_others: expect.objectContaining({ title: "Observe Other Participants" }),
+    });
   });
 
   it("normalizes config values and applies defaults", async () => {
@@ -156,6 +160,27 @@ describe("honcho config", () => {
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.headers.authorization).toBeUndefined();
+  });
+
+  it("forwards a configured API key to self-hosted Honcho connections", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "http://127.0.0.1:8000",
+        honchoApiKey: "HONCHO_API_KEY",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    const result = await harness.performAction("test-connection");
+    expect(result).toMatchObject({
+      ok: true,
+      workspaceId: "paperclip_co_1",
+    });
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.headers.authorization).toBe("Bearer resolved:HONCHO_API_KEY");
   });
 
   it("accepts legacy config aliases while resolving to the renamed public keys", async () => {

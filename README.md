@@ -53,7 +53,7 @@ The integration breaks down into four parts:
 
 - Identity and scope: Paperclip companies map to Honcho workspaces, issues map to sessions, and humans plus agents map to peers.
 - Sync behavior: issue comments and document revisions sync into Honcho, with document content sectioned and normalized message content capped before ingestion.
-- Operator controls: the plugin settings page provides setup, status, initialization, and repair flows, plus an issue-level `Memory` tab.
+- Operator controls: the plugin settings page provides setup, status, and initialization flows, plus an issue-level `Memory` tab.
 - Agent tools: Paperclip agents get Honcho retrieval and peer-chat tools.
 
 ## Operator Actions

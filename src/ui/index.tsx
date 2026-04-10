@@ -665,7 +665,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
 
   async function triggerJob(jobKey: string) {
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 15_000;
+    const timeoutAt = Date.now() + 5 * 60_000;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
@@ -675,7 +675,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         refreshActivationData();
         return;
       }
-      await sleep(100);
+      await sleep(1_000);
     }
     throw new Error(`Timed out waiting for ${jobKey} to complete.`);
   }

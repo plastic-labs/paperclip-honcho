@@ -6927,12 +6927,12 @@ var manifest = {
       },
       observe_me: {
         type: "boolean",
-        title: "observe_me",
+        title: "Observe Current Agent",
         default: DEFAULT_CONFIG.observe_me
       },
       observe_others: {
         type: "boolean",
-        title: "observe_others",
+        title: "Observe Other Participants",
         default: DEFAULT_CONFIG.observe_others
       },
       noisePatterns: {
@@ -7688,7 +7688,7 @@ var HonchoClient = class {
   }
 };
 async function createHonchoClient(input) {
-  const apiKey = isHonchoCloudBaseUrl(input.config.honchoApiBaseUrl) ? await input.ctx.secrets.resolve(input.config.honchoApiKey) : null;
+  const apiKey = input.config.honchoApiKey ? await input.ctx.secrets.resolve(input.config.honchoApiKey) : null;
   return new HonchoClient({ ...input, apiKey });
 }
 

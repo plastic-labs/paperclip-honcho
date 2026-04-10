@@ -76,7 +76,7 @@ function normalizeSettingsConfig(configJson) {
   const source = configJson ?? {};
   return {
     honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() : DEFAULT_CONFIG.honchoApiBaseUrl,
-    honchoApiKey: typeof source.honchoApiKey === "string" ? source.honchoApiKey : typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef : DEFAULT_CONFIG.honchoApiKey,
+    honchoApiKey: typeof source.honchoApiKey === "string" ? source.honchoApiKey.trim() : typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef.trim() : DEFAULT_CONFIG.honchoApiKey,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
     syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
@@ -649,7 +649,7 @@ function HonchoSettingsPage({ context }) {
   }
   async function triggerJob(jobKey) {
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 15e3;
+    const timeoutAt = Date.now() + 5 * 6e4;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
@@ -659,7 +659,7 @@ function HonchoSettingsPage({ context }) {
         refreshActivationData();
         return;
       }
-      await sleep(100);
+      await sleep(1e3);
     }
     throw new Error(`Timed out waiting for ${jobKey} to complete.`);
   }

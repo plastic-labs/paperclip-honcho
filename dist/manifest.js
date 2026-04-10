@@ -141,12 +141,12 @@ var manifest = {
       },
       observe_me: {
         type: "boolean",
-        title: "observe_me",
+        title: "Observe Current Agent",
         default: DEFAULT_CONFIG.observe_me
       },
       observe_others: {
         type: "boolean",
-        title: "observe_others",
+        title: "Observe Other Participants",
         default: DEFAULT_CONFIG.observe_others
       },
       noisePatterns: {
