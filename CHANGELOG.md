@@ -2,6 +2,16 @@
 
 All notable changes to `@honcho-ai/paperclip-honcho` will be documented in this file.
 
+## [0.1.2] - 2026-04-13
+
+### Changed
+- Issue sessions now use the Paperclip issue identifier for new Honcho session names so the Honcho dashboard shows the same task label operators see in Paperclip.
+- Existing workspace and issue session mappings are now treated as canonical, preventing later `workspacePrefix` edits from silently remapping Honcho workspaces or sessions.
+
+### Fixed
+- Fixed `agent_profile_files` imports so they create and map agent peers instead of incorrectly falling through the owner peer path.
+- Fixed session and workspace lookup paths to honor persisted mappings, keeping reads, writes, and repair actions aligned with previously created Honcho resources.
+
 ## [0.1.1] - 2026-04-10
 
 ### Added
