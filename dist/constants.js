@@ -67,7 +67,6 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  repairMappings: "repair-mappings",
   resyncIssue: "resync-issue"
 };
 var JOB_KEYS = {

@@ -6996,7 +6996,6 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  repairMappings: "repair-mappings",
   resyncIssue: "resync-issue"
 };
 var JOB_KEYS = {
@@ -7438,7 +7437,10 @@ function joinHonchoId(parts) {
 function workspaceIdForCompany(companyId, workspacePrefix) {
   return joinHonchoId([workspacePrefix, companyId]);
 }
-function peerIdForAgent(agentId) {
+function peerIdForAgent(agentId, agentUrlKey) {
+  if (typeof agentUrlKey === "string" && agentUrlKey.trim()) {
+    return joinHonchoId(["agent", agentUrlKey]);
+  }
   return joinHonchoId(["agent", agentId]);
 }
 function peerIdForUser(userId) {
@@ -7555,7 +7557,9 @@ async function upsertBootstrapSessionMapping(ctx, companyId, input) {
   });
 }
 async function upsertAgentPeerMapping(ctx, companyId, agent, status = "mapped") {
-  const peerId = peerIdForAgent(agent.id);
+  const existing = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agent.id}`);
+  const mappedPeerId = typeof existing?.data.peerId === "string" && existing.data.peerId.trim() ? existing.data.peerId : null;
+  const peerId = mappedPeerId ?? peerIdForAgent(agent.id, agent.urlKey ?? null);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -7569,6 +7573,7 @@ async function upsertAgentPeerMapping(ctx, companyId, agent, status = "mapped") 
       peerId,
       peerType: "agent",
       name: agent.name,
+      urlKey: agent.urlKey ?? null,
       role: agent.role,
       title: agent.title,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -7681,6 +7686,16 @@ async function getSessionMappingRecord(ctx, issueId) {
   });
   return records[0] ?? null;
 }
+async function getPeerMappingRecord(ctx, companyId, externalId) {
+  const records = await ctx.entities.list({
+    entityType: ENTITY_TYPES.peerMapping,
+    scopeKind: "company",
+    scopeId: companyId,
+    externalId,
+    limit: 1
+  });
+  return records[0] ?? null;
+}
 async function resolveCanonicalWorkspaceId(ctx, companyId, workspacePrefix) {
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim() ? mapping.data.workspaceId : null;
@@ -7690,6 +7705,11 @@ async function resolveCanonicalIssueSessionId(ctx, issueId, issueIdentifier) {
   const mapping = await getSessionMappingRecord(ctx, issueId);
   const mappedSessionId = typeof mapping?.data.sessionId === "string" && mapping.data.sessionId.trim() ? mapping.data.sessionId : null;
   return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
+}
+async function resolveCanonicalAgentPeerId(ctx, companyId, agentId, agentUrlKey) {
+  const mapping = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agentId}`);
+  const mappedPeerId = typeof mapping?.data.peerId === "string" && mapping.data.peerId.trim() ? mapping.data.peerId : null;
+  return mappedPeerId ?? peerIdForAgent(agentId, agentUrlKey);
 }
 async function upsertMigrationReport(ctx, companyId, reportType, payload) {
   return await upsertEntity(ctx, {
@@ -7878,6 +7898,7 @@ var HonchoClient = class {
   ensuredPeers = /* @__PURE__ */ new Set();
   resolvedWorkspaceIds = /* @__PURE__ */ new Map();
   resolvedSessionIds = /* @__PURE__ */ new Map();
+  resolvedAgentPeerIds = /* @__PURE__ */ new Map();
   constructor(input) {
     this.ctx = input.ctx;
     this.config = input.config;
@@ -7906,6 +7927,22 @@ var HonchoClient = class {
     );
     this.resolvedSessionIds.set(cacheKey, sessionId);
     return sessionId;
+  }
+  async agentPeerId(companyId, agentId, agent) {
+    const cacheKey = `${companyId}:${agentId}`;
+    const cachedPeerId = this.resolvedAgentPeerIds.get(cacheKey);
+    if (cachedPeerId) {
+      return cachedPeerId;
+    }
+    const resolvedAgent = agent ?? await this.ctx.agents.get(agentId, companyId);
+    const peerId = await resolveCanonicalAgentPeerId(
+      this.ctx,
+      companyId,
+      agentId,
+      resolvedAgent?.urlKey ?? null
+    );
+    this.resolvedAgentPeerIds.set(cacheKey, peerId);
+    return peerId;
   }
   async ensureWorkspace(companyId) {
     const workspaceId = await this.workspaceId(companyId);
@@ -7973,13 +8010,15 @@ var HonchoClient = class {
     return peerId;
   }
   async ensureAgentPeer(companyId, agent) {
+    const peerId = await this.agentPeerId(companyId, agent.id, agent);
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id),
+      peerId,
       {
         company_id: companyId,
         agent_id: agent.id,
         agent_name: agent.name,
+        agent_url_key: agent.urlKey ?? null,
         agent_role: agent.role,
         agent_title: agent.title
       },
@@ -8122,11 +8161,12 @@ var HonchoClient = class {
   }
   async getPeerRepresentation(companyId, agentId, params) {
     const workspaceId = await this.workspaceId(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8139,10 +8179,11 @@ var HonchoClient = class {
   }
   async searchMemory(companyId, agentId, params) {
     const agent = await this.ctx.agents.get(agentId, companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId, agent);
     if (agent) {
       await this.ensureAgentPeer(companyId, agent);
     } else {
-      await this.ensurePeer(companyId, peerIdForAgent(agentId), {
+      await this.ensurePeer(companyId, agentPeerId, {
         company_id: companyId,
         agent_id: agentId
       }, {
@@ -8156,7 +8197,7 @@ var HonchoClient = class {
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8180,11 +8221,12 @@ var HonchoClient = class {
   }
   async askPeer(companyId, agentId, params) {
     const workspaceId = await this.ensureWorkspace(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/chat`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/chat`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8407,8 +8449,12 @@ function buildSyncErrorSummary(input) {
 
 // src/sync.ts
 var migrationCandidatesLoaderOverride = null;
-function peerIdFromActor(actor) {
-  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
+var issueSyncQueue = /* @__PURE__ */ new Map();
+async function resolvePeerIdFromActor(ctx, companyId, actor) {
+  if (actor.authorType === "agent") {
+    const agent = await ctx.agents.get(actor.authorId, companyId);
+    return await resolveCanonicalAgentPeerId(ctx, companyId, actor.authorId, agent?.urlKey ?? null);
+  }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -8574,7 +8620,7 @@ async function fetchIssueResources(ctx, issueId, companyId, config) {
   const documents = config.syncIssueDocuments ? await listDocumentBundles(ctx, issueId, companyId) : [];
   return { issue, company, comments, documents };
 }
-async function buildCommentMessages(issue, comments, config, replay, lastSyncedCommentId) {
+async function buildCommentMessages(ctx, issue, comments, config, replay, lastSyncedCommentId) {
   const started = replay || !lastSyncedCommentId;
   const messages = [];
   let unlocked = started;
@@ -8588,9 +8634,10 @@ async function buildCommentMessages(issue, comments, config, replay, lastSyncedC
     const normalized = normalizeAndFilterMessage(comment.body, config);
     if (!normalized) continue;
     const actor = actorFromComment(comment);
+    const peerId = await resolvePeerIdFromActor(ctx, issue.companyId, actor);
     messages.push({
       content: normalized.content,
-      peerId: peerIdFromActor(actor),
+      peerId,
       createdAt: new Date(comment.createdAt).toISOString(),
       metadata: {
         ...buildCommentProvenance(issue, comment, actor),
@@ -8601,7 +8648,7 @@ async function buildCommentMessages(issue, comments, config, replay, lastSyncedC
   }
   return messages;
 }
-function buildDocumentMessages(issue, documents, config, lastSyncedRevisionId) {
+async function buildDocumentMessages(ctx, issue, documents, config, lastSyncedRevisionId) {
   const messages = [];
   let unlocked = lastSyncedRevisionId == null;
   for (const bundle of documents) {
@@ -8613,6 +8660,7 @@ function buildDocumentMessages(issue, documents, config, lastSyncedRevisionId) {
         continue;
       }
       const actor = actorFromDocumentRevision(revision);
+      const peerId = await resolvePeerIdFromActor(ctx, issue.companyId, actor);
       for (const section of splitDocumentIntoSections(
         bundle.document,
         revision,
@@ -8623,7 +8671,7 @@ function buildDocumentMessages(issue, documents, config, lastSyncedRevisionId) {
         if (!normalized) continue;
         messages.push({
           content: normalized.content,
-          peerId: peerIdFromActor(actor),
+          peerId,
           createdAt: new Date(revision.createdAt).toISOString(),
           metadata: {
             ...buildDocumentProvenance(issue, revision, actor),
@@ -8789,6 +8837,24 @@ async function loadMigrationCandidates(ctx, companyId) {
   }
   return await buildMigrationCandidates(ctx, companyId);
 }
+async function runIssueSyncExclusive(companyId, issueId, work) {
+  const queueKey = `${companyId}:${issueId}`;
+  const previous = issueSyncQueue.get(queueKey) ?? Promise.resolve();
+  let release = null;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+  issueSyncQueue.set(queueKey, previous.then(() => current));
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release?.();
+    if (issueSyncQueue.get(queueKey) === current) {
+      issueSyncQueue.delete(queueKey);
+    }
+  }
+}
 function buildMigrationPreview(companyId, candidates) {
   const comments = candidates.filter((candidate) => candidate.sourceType === "issue_comments");
   const documents = candidates.filter((candidate) => candidate.sourceType === "issue_documents");
@@ -8799,9 +8865,6 @@ function buildMigrationPreview(companyId, candidates) {
   }
   if (documents.length === 0) {
     warnings.push("No issue document revisions were found for this company.");
-  }
-  if (files.length === 0) {
-    warnings.push("Legacy workspace file import is unavailable in the public-host-compatible Honcho package.");
   }
   return {
     companyId,
@@ -8869,7 +8932,7 @@ async function ensureMigrationCandidateImported(ctx, companyId, candidate, confi
     await ensureActorPeerMapping(ctx, companyId, actor);
     await client.appendMessages(companyId, issue.id, [{
       content: candidate.content,
-      peerId: peerIdFromActor(actor),
+      peerId: await resolvePeerIdFromActor(ctx, companyId, actor),
       createdAt: candidate.createdAt,
       metadata: candidate.metadata
     }]);
@@ -9110,13 +9173,8 @@ async function initializeMemory(ctx, companyId) {
   });
   try {
     await client.probeConnection(companyId, company);
+    await repairMappings(ctx, companyId);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-    await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "created", workspaceId);
-    const agents = await listCompanyAgents(ctx, companyId);
-    for (const agent of agents) {
-      await client.ensureAgentPeer(companyId, agent);
-      await upsertAgentPeerMapping(ctx, companyId, agent);
-    }
     const preview = await scanMigrationSources(ctx, companyId);
     const countsBefore = await listMappingCounts(ctx, companyId);
     await importMigrationPreview(ctx, companyId);
@@ -9187,80 +9245,82 @@ async function initializeMemory(ctx, companyId) {
   }
 }
 async function syncIssue(ctx, issueId, companyId, options = {}) {
-  const config = await getResolvedConfig(ctx);
-  const status = await getIssueSyncStatus(ctx, issueId);
-  const replay = options.replay === true;
-  const resources = await fetchIssueResources(ctx, issueId, companyId, config);
-  const client = await createHonchoClient({ ctx, config });
-  await patchIssueSyncStatus(ctx, issueId, {
-    replayInProgress: replay,
-    replayRequestedAt: replay ? (/* @__PURE__ */ new Date()).toISOString() : status.replayRequestedAt
-  });
-  try {
-    await ensureIssueTopology(ctx, resources, client, config);
-    const commentMessages = config.syncIssueComments ? await buildCommentMessages(resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId) : [];
-    const documentMessages = config.syncIssueDocuments ? buildDocumentMessages(resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId) : [];
-    const allMessages = [...commentMessages, ...documentMessages];
-    if (allMessages.length > 0) {
-      await client.appendMessages(resources.issue.companyId, resources.issue.id, allMessages);
-    } else {
-      await client.ensureIssueSession(resources.issue, resources.company);
+  return await runIssueSyncExclusive(companyId, issueId, async () => {
+    const config = await getResolvedConfig(ctx);
+    const status = await getIssueSyncStatus(ctx, issueId);
+    const replay = options.replay === true;
+    const resources = await fetchIssueResources(ctx, issueId, companyId, config);
+    const client = await createHonchoClient({ ctx, config });
+    await patchIssueSyncStatus(ctx, issueId, {
+      replayInProgress: replay,
+      replayRequestedAt: replay ? (/* @__PURE__ */ new Date()).toISOString() : status.replayRequestedAt
+    });
+    try {
+      await ensureIssueTopology(ctx, resources, client, config);
+      const commentMessages = config.syncIssueComments ? await buildCommentMessages(ctx, resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId) : [];
+      const documentMessages = config.syncIssueDocuments ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId) : [];
+      const allMessages = [...commentMessages, ...documentMessages];
+      if (allMessages.length > 0) {
+        await client.appendMessages(resources.issue.companyId, resources.issue.id, allMessages);
+      } else {
+        await client.ensureIssueSession(resources.issue, resources.company);
+      }
+      const lastComment = resources.comments.at(-1) ?? null;
+      const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
+      const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
+      await patchIssueSyncStatus(ctx, issueId, {
+        lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
+        lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
+        lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
+        lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
+        lastBackfillAt: (/* @__PURE__ */ new Date()).toISOString(),
+        replayInProgress: false,
+        lastError: null,
+        latestAppendAt: allMessages.length > 0 ? (/* @__PURE__ */ new Date()).toISOString() : status.latestAppendAt,
+        latestContextPreview: context.preview,
+        latestContextFetchedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      await patchCompanySyncStatus(ctx, companyId, {
+        connectionStatus: "connected",
+        workspaceStatus: "mapped",
+        peerStatus: "partial",
+        lastSuccessfulSyncAt: (/* @__PURE__ */ new Date()).toISOString(),
+        lastError: null
+      });
+      return {
+        issueId: resources.issue.id,
+        issueIdentifier: resources.issue.identifier ?? null,
+        syncedComments: commentMessages.length,
+        syncedDocumentSections: documentMessages.length,
+        syncedRuns: 0,
+        lastSyncedCommentId: lastComment?.id ?? null,
+        lastSyncedRunId: null,
+        replayed: replay
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const previous = await getCompanySyncStatus(ctx, companyId);
+      await patchCompanySyncStatus(ctx, companyId, {
+        pendingFailureCount: previous.pendingFailureCount + 1,
+        lastError: buildSyncErrorSummary({
+          message,
+          issueId,
+          commentId: options.commentIdHint ?? null,
+          documentKey: options.documentKeyHint ?? null
+        })
+      });
+      await patchIssueSyncStatus(ctx, issueId, {
+        replayInProgress: false,
+        lastError: buildSyncErrorSummary({
+          message,
+          issueId,
+          commentId: options.commentIdHint ?? null,
+          documentKey: options.documentKeyHint ?? null
+        })
+      });
+      throw error;
     }
-    const lastComment = resources.comments.at(-1) ?? null;
-    const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
-    const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
-    await patchIssueSyncStatus(ctx, issueId, {
-      lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
-      lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
-      lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
-      lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
-      lastBackfillAt: (/* @__PURE__ */ new Date()).toISOString(),
-      replayInProgress: false,
-      lastError: null,
-      latestAppendAt: allMessages.length > 0 ? (/* @__PURE__ */ new Date()).toISOString() : status.latestAppendAt,
-      latestContextPreview: context.preview,
-      latestContextFetchedAt: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    await patchCompanySyncStatus(ctx, companyId, {
-      connectionStatus: "connected",
-      workspaceStatus: "mapped",
-      peerStatus: "partial",
-      lastSuccessfulSyncAt: (/* @__PURE__ */ new Date()).toISOString(),
-      lastError: null
-    });
-    return {
-      issueId: resources.issue.id,
-      issueIdentifier: resources.issue.identifier ?? null,
-      syncedComments: commentMessages.length,
-      syncedDocumentSections: documentMessages.length,
-      syncedRuns: 0,
-      lastSyncedCommentId: lastComment?.id ?? null,
-      lastSyncedRunId: null,
-      replayed: replay
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const previous = await getCompanySyncStatus(ctx, companyId);
-    await patchCompanySyncStatus(ctx, companyId, {
-      pendingFailureCount: previous.pendingFailureCount + 1,
-      lastError: buildSyncErrorSummary({
-        message,
-        issueId,
-        commentId: options.commentIdHint ?? null,
-        documentKey: options.documentKeyHint ?? null
-      })
-    });
-    await patchIssueSyncStatus(ctx, issueId, {
-      replayInProgress: false,
-      lastError: buildSyncErrorSummary({
-        message,
-        issueId,
-        commentId: options.commentIdHint ?? null,
-        documentKey: options.documentKeyHint ?? null
-      })
-    });
-    throw error;
-  }
+  });
 }
 async function replayIssue(ctx, issueId, companyId) {
   await clearIssueSyncStatus(ctx, issueId);
@@ -9552,10 +9612,6 @@ var plugin = definePlugin({
         agentId: typeof params.agentId === "string" ? params.agentId : null,
         prompt: typeof params.prompt === "string" ? params.prompt : null
       });
-    });
-    ctx.actions.register(ACTION_KEYS.repairMappings, async (params) => {
-      const companyId = requireString(params.companyId, "companyId");
-      return await repairMappings(ctx, companyId);
     });
     ctx.jobs.register(JOB_KEYS.initializeMemory, async () => {
       const companies = await ctx.companies.list({ limit: 1, offset: 0 });
