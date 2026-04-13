@@ -1,4 +1,5 @@
 // src/constants.ts
+var PLUGIN_VERSION = "0.1.2";
 var DEFAULT_WORKSPACE_PREFIX = "paperclip";
 var HONCHO_V3_PATH = "/v3";
 var HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
@@ -71,7 +72,6 @@ var DEFAULT_CONFIG = {
 
 // src/manifest.ts
 var PLUGIN_ID = "honcho-ai.paperclip-honcho";
-var PLUGIN_VERSION = "0.1.2";
 var manifest = {
   id: PLUGIN_ID,
   apiVersion: 1,

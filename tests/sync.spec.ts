@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_MAX_INGEST_MESSAGE_CHARS } from "../src/constants.js";
+import { getIssueSyncQueueSizeForTests } from "../src/sync.js";
 import plugin from "../src/worker.js";
 import { buildDefaultFixtures, createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
@@ -100,6 +101,7 @@ describe("honcho sync", () => {
     expect(messageRequests).toHaveLength(1);
     const messages = (messageRequests[0]?.body?.messages ?? []) as Array<Record<string, unknown>>;
     expect(messages.map((message) => (message.metadata as Record<string, unknown>)?.commentId)).toEqual(["c_1", "c_2", null]);
+    expect(getIssueSyncQueueSizeForTests()).toBe(0);
   });
 
   it("marks blank comments as synced without appending empty Honcho messages", async () => {
