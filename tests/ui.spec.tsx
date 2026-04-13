@@ -247,7 +247,9 @@ describe("HonchoSettingsPage", () => {
 
   it("runs activation steps in order and reports progress", async () => {
     const triggeredJobs: string[] = [];
-    let resolveValidation: (() => void) | null = null;
+    let resolveValidation: () => void = () => {
+      throw new Error("Validation resolver was not initialized");
+    };
     installFetchStub({
       configTestResponse: () => new Promise<Response>((resolve) => {
         resolveValidation = () => resolve(new Response(JSON.stringify({ valid: true, message: "Configuration is valid." }), { status: 200 }));
@@ -269,7 +271,7 @@ describe("HonchoSettingsPage", () => {
       expect((screen.getByRole("button", { name: "Validating config..." }) as HTMLButtonElement).disabled).toBe(true);
     });
 
-    resolveValidation?.();
+    resolveValidation();
 
     await waitFor(() => {
       expect(screen.getByText("Honcho activation completed.")).toBeTruthy();

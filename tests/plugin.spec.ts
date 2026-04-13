@@ -41,7 +41,7 @@ describe("@honcho-ai/paperclip-honcho smoke", () => {
       runId: "run_1",
     });
     const askResult = await harness.executeTool("honcho_ask_peer", {
-      targetPeerId: "agent_agent-one",
+      targetPeerId: "agent_agent_1",
       query: "What happened?",
       issueId: "iss_1",
     }, {

@@ -232,7 +232,7 @@ describe("honcho memory jobs", () => {
         }),
       }),
       expect.objectContaining({
-        peer_id: "agent_agent-one",
+        peer_id: "agent_agent_1",
         metadata: expect.objectContaining({
           contentType: "issue_document_section",
           documentRevisionId: "rev_2",
@@ -255,7 +255,7 @@ describe("honcho memory jobs", () => {
 
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent-one",
+      id: "agent_agent_1",
       configuration: expect.any(Object),
     });
     expect(peerRequest?.body).not.toHaveProperty("config");
@@ -366,15 +366,15 @@ describe("honcho memory jobs", () => {
       expect.objectContaining({
         externalId: "paperclip:agent:agent_1",
         data: expect.objectContaining({
-          peerId: "agent_agent-one",
+          peerId: "agent_agent_1",
           peerType: "agent",
         }),
       }),
     ]));
 
-    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_agent-one");
+    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_agent_1");
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent-one",
+      id: "agent_agent_1",
       metadata: expect.objectContaining({
         agent_id: "agent_1",
       }),

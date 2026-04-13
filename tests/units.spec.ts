@@ -16,7 +16,6 @@ describe("honcho units", () => {
     expect(sessionIdForIssue("iss_1")).toBe("issue_iss_1");
     expect(sessionIdForIssue("iss_1", "PAP-1")).toBe("PAP-1");
     expect(peerIdForAgent("agent_1")).toBe("agent_agent_1");
-    expect(peerIdForAgent("agent_1", "agent-one")).toBe("agent_agent-one");
     expect(peerIdForUser("user_1")).toBe("user_user_1");
   });
 

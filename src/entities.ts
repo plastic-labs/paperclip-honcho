@@ -149,11 +149,7 @@ export async function upsertAgentPeerMapping(
   agent: Agent,
   status: "mapped" | "missing" = "mapped",
 ) {
-  const existing = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agent.id}`);
-  const mappedPeerId = typeof existing?.data.peerId === "string" && existing.data.peerId.trim()
-    ? existing.data.peerId
-    : null;
-  const peerId = mappedPeerId ?? peerIdForAgent(agent.id, agent.urlKey ?? null);
+  const peerId = peerIdForAgent(agent.id);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -167,7 +163,6 @@ export async function upsertAgentPeerMapping(
       peerId,
       peerType: "agent",
       name: agent.name,
-      urlKey: agent.urlKey ?? null,
       role: agent.role,
       title: agent.title,
       updatedAt: new Date().toISOString(),
@@ -337,17 +332,6 @@ export async function getSessionMappingRecord(ctx: PluginContext, issueId: strin
   return records[0] ?? null;
 }
 
-export async function getPeerMappingRecord(ctx: PluginContext, companyId: string, externalId: string) {
-  const records = await ctx.entities.list({
-    entityType: ENTITY_TYPES.peerMapping,
-    scopeKind: "company",
-    scopeId: companyId,
-    externalId,
-    limit: 1,
-  });
-  return records[0] ?? null;
-}
-
 export async function resolveCanonicalWorkspaceId(
   ctx: PluginContext,
   companyId: string,
@@ -370,19 +354,6 @@ export async function resolveCanonicalIssueSessionId(
     ? mapping.data.sessionId
     : null;
   return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
-}
-
-export async function resolveCanonicalAgentPeerId(
-  ctx: PluginContext,
-  companyId: string,
-  agentId: string,
-  agentUrlKey?: string | null,
-) {
-  const mapping = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agentId}`);
-  const mappedPeerId = typeof mapping?.data.peerId === "string" && mapping.data.peerId.trim()
-    ? mapping.data.peerId
-    : null;
-  return mappedPeerId ?? peerIdForAgent(agentId, agentUrlKey);
 }
 
 export async function upsertMigrationReport(

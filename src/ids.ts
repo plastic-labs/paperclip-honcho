@@ -20,10 +20,7 @@ export function workspaceIdForCompany(companyId: string, workspacePrefix: string
   return joinHonchoId([workspacePrefix, companyId]);
 }
 
-export function peerIdForAgent(agentId: string, agentUrlKey?: string | null): string {
-  if (typeof agentUrlKey === "string" && agentUrlKey.trim()) {
-    return joinHonchoId(["agent", agentUrlKey]);
-  }
+export function peerIdForAgent(agentId: string): string {
   return joinHonchoId(["agent", agentId]);
 }
 

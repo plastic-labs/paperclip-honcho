@@ -7437,10 +7437,7 @@ function joinHonchoId(parts) {
 function workspaceIdForCompany(companyId, workspacePrefix) {
   return joinHonchoId([workspacePrefix, companyId]);
 }
-function peerIdForAgent(agentId, agentUrlKey) {
-  if (typeof agentUrlKey === "string" && agentUrlKey.trim()) {
-    return joinHonchoId(["agent", agentUrlKey]);
-  }
+function peerIdForAgent(agentId) {
   return joinHonchoId(["agent", agentId]);
 }
 function peerIdForUser(userId) {
@@ -7557,9 +7554,7 @@ async function upsertBootstrapSessionMapping(ctx, companyId, input) {
   });
 }
 async function upsertAgentPeerMapping(ctx, companyId, agent, status = "mapped") {
-  const existing = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agent.id}`);
-  const mappedPeerId = typeof existing?.data.peerId === "string" && existing.data.peerId.trim() ? existing.data.peerId : null;
-  const peerId = mappedPeerId ?? peerIdForAgent(agent.id, agent.urlKey ?? null);
+  const peerId = peerIdForAgent(agent.id);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -7573,7 +7568,6 @@ async function upsertAgentPeerMapping(ctx, companyId, agent, status = "mapped") 
       peerId,
       peerType: "agent",
       name: agent.name,
-      urlKey: agent.urlKey ?? null,
       role: agent.role,
       title: agent.title,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -7686,16 +7680,6 @@ async function getSessionMappingRecord(ctx, issueId) {
   });
   return records[0] ?? null;
 }
-async function getPeerMappingRecord(ctx, companyId, externalId) {
-  const records = await ctx.entities.list({
-    entityType: ENTITY_TYPES.peerMapping,
-    scopeKind: "company",
-    scopeId: companyId,
-    externalId,
-    limit: 1
-  });
-  return records[0] ?? null;
-}
 async function resolveCanonicalWorkspaceId(ctx, companyId, workspacePrefix) {
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim() ? mapping.data.workspaceId : null;
@@ -7705,11 +7689,6 @@ async function resolveCanonicalIssueSessionId(ctx, issueId, issueIdentifier) {
   const mapping = await getSessionMappingRecord(ctx, issueId);
   const mappedSessionId = typeof mapping?.data.sessionId === "string" && mapping.data.sessionId.trim() ? mapping.data.sessionId : null;
   return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
-}
-async function resolveCanonicalAgentPeerId(ctx, companyId, agentId, agentUrlKey) {
-  const mapping = await getPeerMappingRecord(ctx, companyId, `paperclip:agent:${agentId}`);
-  const mappedPeerId = typeof mapping?.data.peerId === "string" && mapping.data.peerId.trim() ? mapping.data.peerId : null;
-  return mappedPeerId ?? peerIdForAgent(agentId, agentUrlKey);
 }
 async function upsertMigrationReport(ctx, companyId, reportType, payload) {
   return await upsertEntity(ctx, {
@@ -7898,7 +7877,6 @@ var HonchoClient = class {
   ensuredPeers = /* @__PURE__ */ new Set();
   resolvedWorkspaceIds = /* @__PURE__ */ new Map();
   resolvedSessionIds = /* @__PURE__ */ new Map();
-  resolvedAgentPeerIds = /* @__PURE__ */ new Map();
   constructor(input) {
     this.ctx = input.ctx;
     this.config = input.config;
@@ -7927,22 +7905,6 @@ var HonchoClient = class {
     );
     this.resolvedSessionIds.set(cacheKey, sessionId);
     return sessionId;
-  }
-  async agentPeerId(companyId, agentId, agent) {
-    const cacheKey = `${companyId}:${agentId}`;
-    const cachedPeerId = this.resolvedAgentPeerIds.get(cacheKey);
-    if (cachedPeerId) {
-      return cachedPeerId;
-    }
-    const resolvedAgent = agent ?? await this.ctx.agents.get(agentId, companyId);
-    const peerId = await resolveCanonicalAgentPeerId(
-      this.ctx,
-      companyId,
-      agentId,
-      resolvedAgent?.urlKey ?? null
-    );
-    this.resolvedAgentPeerIds.set(cacheKey, peerId);
-    return peerId;
   }
   async ensureWorkspace(companyId) {
     const workspaceId = await this.workspaceId(companyId);
@@ -8010,15 +7972,13 @@ var HonchoClient = class {
     return peerId;
   }
   async ensureAgentPeer(companyId, agent) {
-    const peerId = await this.agentPeerId(companyId, agent.id, agent);
     return await this.ensurePeer(
       companyId,
-      peerId,
+      peerIdForAgent(agent.id),
       {
         company_id: companyId,
         agent_id: agent.id,
         agent_name: agent.name,
-        agent_url_key: agent.urlKey ?? null,
         agent_role: agent.role,
         agent_title: agent.title
       },
@@ -8161,12 +8121,11 @@ var HonchoClient = class {
   }
   async getPeerRepresentation(companyId, agentId, params) {
     const workspaceId = await this.workspaceId(companyId);
-    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8179,11 +8138,10 @@ var HonchoClient = class {
   }
   async searchMemory(companyId, agentId, params) {
     const agent = await this.ctx.agents.get(agentId, companyId);
-    const agentPeerId = await this.agentPeerId(companyId, agentId, agent);
     if (agent) {
       await this.ensureAgentPeer(companyId, agent);
     } else {
-      await this.ensurePeer(companyId, agentPeerId, {
+      await this.ensurePeer(companyId, peerIdForAgent(agentId), {
         company_id: companyId,
         agent_id: agentId
       }, {
@@ -8197,7 +8155,7 @@ var HonchoClient = class {
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8221,12 +8179,11 @@ var HonchoClient = class {
   }
   async askPeer(companyId, agentId, params) {
     const workspaceId = await this.ensureWorkspace(companyId);
-    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/chat`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/chat`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8450,11 +8407,8 @@ function buildSyncErrorSummary(input) {
 // src/sync.ts
 var migrationCandidatesLoaderOverride = null;
 var issueSyncQueue = /* @__PURE__ */ new Map();
-async function resolvePeerIdFromActor(ctx, companyId, actor) {
-  if (actor.authorType === "agent") {
-    const agent = await ctx.agents.get(actor.authorId, companyId);
-    return await resolveCanonicalAgentPeerId(ctx, companyId, actor.authorId, agent?.urlKey ?? null);
-  }
+async function resolvePeerIdFromActor(_ctx, _companyId, actor) {
+  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -8840,7 +8794,8 @@ async function loadMigrationCandidates(ctx, companyId) {
 async function runIssueSyncExclusive(companyId, issueId, work) {
   const queueKey = `${companyId}:${issueId}`;
   const previous = issueSyncQueue.get(queueKey) ?? Promise.resolve();
-  let release = null;
+  let release = () => {
+  };
   const current = new Promise((resolve) => {
     release = resolve;
   });
@@ -8849,7 +8804,7 @@ async function runIssueSyncExclusive(companyId, issueId, work) {
   try {
     return await work();
   } finally {
-    release?.();
+    release();
     if (issueSyncQueue.get(queueKey) === current) {
       issueSyncQueue.delete(queueKey);
     }

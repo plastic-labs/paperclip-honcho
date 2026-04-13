@@ -47,7 +47,6 @@ import {
   getImportLedgerRecord,
   listJobsForUi,
   listMappingCounts,
-  resolveCanonicalAgentPeerId,
   upsertAgentPeerMapping,
   upsertBootstrapSessionMapping,
   upsertFileImportSource,
@@ -93,14 +92,11 @@ let migrationCandidatesLoaderOverride: MigrationCandidatesLoader | null = null;
 const issueSyncQueue = new Map<string, Promise<void>>();
 
 async function resolvePeerIdFromActor(
-  ctx: PluginContext,
-  companyId: string,
+  _ctx: PluginContext,
+  _companyId: string,
   actor: HonchoActor,
 ): Promise<string> {
-  if (actor.authorType === "agent") {
-    const agent = await ctx.agents.get(actor.authorId, companyId);
-    return await resolveCanonicalAgentPeerId(ctx, companyId, actor.authorId, agent?.urlKey ?? null);
-  }
+  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -581,7 +577,7 @@ export function setMigrationCandidatesLoaderForTests(loader: MigrationCandidates
 async function runIssueSyncExclusive<T>(companyId: string, issueId: string, work: () => Promise<T>): Promise<T> {
   const queueKey = `${companyId}:${issueId}`;
   const previous = issueSyncQueue.get(queueKey) ?? Promise.resolve();
-  let release: (() => void) | null = null;
+  let release: () => void = () => {};
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -590,7 +586,7 @@ async function runIssueSyncExclusive<T>(companyId: string, issueId: string, work
   try {
     return await work();
   } finally {
-    release?.();
+    release();
     if (issueSyncQueue.get(queueKey) === current) {
       issueSyncQueue.delete(queueKey);
     }
