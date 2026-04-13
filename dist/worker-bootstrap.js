@@ -7444,7 +7444,10 @@ function peerIdForAgent(agentId) {
 function peerIdForUser(userId) {
   return joinHonchoId(["user", userId]);
 }
-function sessionIdForIssue(issueId) {
+function sessionIdForIssue(issueId, issueIdentifier) {
+  if (typeof issueIdentifier === "string" && issueIdentifier.trim()) {
+    return joinHonchoId([issueIdentifier]);
+  }
   return joinHonchoId(["issue", issueId]);
 }
 function ownerPeerIdForCompany(companyId) {
@@ -7507,6 +7510,9 @@ async function upsertWorkspaceMapping(ctx, company, companyId, workspacePrefix, 
   });
 }
 async function upsertSessionMapping(ctx, issue, workspaceId) {
+  const existing = await getSessionMappingRecord(ctx, issue.id);
+  const mappedSessionId = typeof existing?.data.sessionId === "string" && existing.data.sessionId.trim() ? existing.data.sessionId : null;
+  const sessionId = mappedSessionId ?? sessionIdForIssue(issue.id, issue.identifier ?? null);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.sessionMapping,
     scopeKind: "issue",
@@ -7518,7 +7524,7 @@ async function upsertSessionMapping(ctx, issue, workspaceId) {
       companyId: issue.companyId,
       issueId: issue.id,
       issueIdentifier: issue.identifier ?? null,
-      sessionId: sessionIdForIssue(issue.id),
+      sessionId,
       workspaceId,
       issueTitle: issue.title,
       issueStatus: issue.status,
@@ -7665,10 +7671,25 @@ async function getWorkspaceMappingRecord(ctx, companyId) {
   });
   return records[0] ?? null;
 }
+async function getSessionMappingRecord(ctx, issueId) {
+  const records = await ctx.entities.list({
+    entityType: ENTITY_TYPES.sessionMapping,
+    scopeKind: "issue",
+    scopeId: issueId,
+    externalId: `paperclip:issue:${issueId}`,
+    limit: 1
+  });
+  return records[0] ?? null;
+}
 async function resolveCanonicalWorkspaceId(ctx, companyId, workspacePrefix) {
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim() ? mapping.data.workspaceId : null;
   return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+}
+async function resolveCanonicalIssueSessionId(ctx, issueId, issueIdentifier) {
+  const mapping = await getSessionMappingRecord(ctx, issueId);
+  const mappedSessionId = typeof mapping?.data.sessionId === "string" && mapping.data.sessionId.trim() ? mapping.data.sessionId : null;
+  return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
 }
 async function upsertMigrationReport(ctx, companyId, reportType, payload) {
   return await upsertEntity(ctx, {
@@ -7856,6 +7877,7 @@ var HonchoClient = class {
   ensuredSessions = /* @__PURE__ */ new Set();
   ensuredPeers = /* @__PURE__ */ new Set();
   resolvedWorkspaceIds = /* @__PURE__ */ new Map();
+  resolvedSessionIds = /* @__PURE__ */ new Map();
   constructor(input) {
     this.ctx = input.ctx;
     this.config = input.config;
@@ -7870,8 +7892,20 @@ var HonchoClient = class {
     this.resolvedWorkspaceIds.set(companyId, workspaceId);
     return workspaceId;
   }
-  sessionId(issueId) {
-    return sessionIdForIssue(issueId);
+  async sessionId(companyId, issueId, issue) {
+    const cacheKey = `${companyId}:${issueId}`;
+    const cachedSessionId = this.resolvedSessionIds.get(cacheKey);
+    if (cachedSessionId) {
+      return cachedSessionId;
+    }
+    const resolvedIssue = issue ?? await this.ctx.issues.get(issueId, companyId);
+    const sessionId = await resolveCanonicalIssueSessionId(
+      this.ctx,
+      issueId,
+      resolvedIssue?.identifier ?? null
+    );
+    this.resolvedSessionIds.set(cacheKey, sessionId);
+    return sessionId;
   }
   async ensureWorkspace(companyId) {
     const workspaceId = await this.workspaceId(companyId);
@@ -7967,7 +8001,7 @@ var HonchoClient = class {
     );
   }
   async ensureSession(companyId, issueId, metadata) {
-    return await this.ensureRawSession(companyId, this.sessionId(issueId), {
+    return await this.ensureRawSession(companyId, await this.sessionId(companyId, issueId), {
       source_system: "paperclip",
       company_id: companyId,
       issue_id: issueId,
@@ -7992,7 +8026,7 @@ var HonchoClient = class {
   }
   async ensureIssueSession(issue, company) {
     const workspaceId = await this.ensureCompanyWorkspace(issue.companyId, company);
-    const sessionId = this.sessionId(issue.id);
+    const sessionId = await this.sessionId(issue.companyId, issue.id, issue);
     const cacheKey = `${workspaceId}:${sessionId}`;
     if (this.ensuredSessions.has(cacheKey)) {
       return sessionId;
@@ -8096,7 +8130,7 @@ var HonchoClient = class {
       {
         method: "POST",
         body: JSON.stringify({
-          ...params.issueId ? { session_id: this.sessionId(params.issueId) } : {},
+          ...params.issueId ? { session_id: await this.sessionId(companyId, params.issueId) } : {},
           ...params.summaryOnly ? { summary_only: true } : {}
         })
       }
@@ -8117,7 +8151,7 @@ var HonchoClient = class {
       });
     }
     const workspaceId = await this.workspaceId(companyId);
-    const scopedSessionId = params.scope === "workspace" ? void 0 : params.issueId ? this.sessionId(params.issueId) : void 0;
+    const scopedSessionId = params.scope === "workspace" ? void 0 : params.issueId ? await this.sessionId(companyId, params.issueId) : void 0;
     const payload = await requestJson(
       this.ctx,
       this.config,
@@ -8156,7 +8190,7 @@ var HonchoClient = class {
         body: JSON.stringify({
           target: params.targetPeerId,
           query: params.query,
-          session_id: params.issueId ? this.sessionId(params.issueId) : void 0
+          session_id: params.issueId ? await this.sessionId(companyId, params.issueId) : void 0
         })
       }
     );

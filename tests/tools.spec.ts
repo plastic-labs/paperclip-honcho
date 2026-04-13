@@ -38,7 +38,7 @@ describe("honcho tools", () => {
 
     expect(result.content).toContain("Investigating auth regression");
     const contextRequest = requestsMatching(requests, "/context?")[0];
-    expect(contextRequest?.url).toContain("/v3/workspaces/paperclip_co_1/sessions/issue_iss_1/context?");
+    expect(contextRequest?.url).toContain("/v3/workspaces/paperclip_co_1/sessions/PAP-1/context?");
     expect(contextRequest?.url).toContain("summary=true");
     expect(contextRequest?.url).toContain("tokens=2000");
     expect(contextRequest?.url).toContain("peer_target=user_user_1");
@@ -123,8 +123,8 @@ describe("honcho tools", () => {
     const representationRequests = requestsMatching(requests, "/representation");
     expect(representationRequests).toHaveLength(2);
     expect(representationRequests[0]?.body).toMatchObject({
-      session_id: "issue_iss_1",
-      target: "issue_iss_1",
+      session_id: "PAP-1",
+      target: "PAP-1",
     });
     expect(representationRequests[1]?.body).not.toHaveProperty("session_id");
     expect(representationRequests[1]?.body).not.toHaveProperty("target");

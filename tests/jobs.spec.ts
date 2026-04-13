@@ -262,9 +262,9 @@ describe("honcho memory jobs", () => {
     });
     expect(peerRequest?.body).not.toHaveProperty("config");
 
-    const sessionRequest = requestsMatching(requests, "/sessions").find((request) => request.body?.id === "issue_iss_1");
+    const sessionRequest = requestsMatching(requests, "/sessions").find((request) => request.body?.id === "PAP-1");
     expect(sessionRequest?.body).toMatchObject({
-      id: "issue_iss_1",
+      id: "PAP-1",
     });
 
     const messageRequest = requestsMatching(requests, "/messages")[0];

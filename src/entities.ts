@@ -77,6 +77,11 @@ export async function upsertSessionMapping(
   issue: Issue,
   workspaceId: string,
 ) {
+  const existing = await getSessionMappingRecord(ctx, issue.id);
+  const mappedSessionId = typeof existing?.data.sessionId === "string" && existing.data.sessionId.trim()
+    ? existing.data.sessionId
+    : null;
+  const sessionId = mappedSessionId ?? sessionIdForIssue(issue.id, issue.identifier ?? null);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.sessionMapping,
     scopeKind: "issue",
@@ -88,7 +93,7 @@ export async function upsertSessionMapping(
       companyId: issue.companyId,
       issueId: issue.id,
       issueIdentifier: issue.identifier ?? null,
-      sessionId: sessionIdForIssue(issue.id),
+      sessionId,
       workspaceId,
       issueTitle: issue.title,
       issueStatus: issue.status,
@@ -316,6 +321,17 @@ export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: s
   return records[0] ?? null;
 }
 
+export async function getSessionMappingRecord(ctx: PluginContext, issueId: string) {
+  const records = await ctx.entities.list({
+    entityType: ENTITY_TYPES.sessionMapping,
+    scopeKind: "issue",
+    scopeId: issueId,
+    externalId: `paperclip:issue:${issueId}`,
+    limit: 1,
+  });
+  return records[0] ?? null;
+}
+
 export async function resolveCanonicalWorkspaceId(
   ctx: PluginContext,
   companyId: string,
@@ -326,6 +342,18 @@ export async function resolveCanonicalWorkspaceId(
     ? mapping.data.workspaceId
     : null;
   return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+}
+
+export async function resolveCanonicalIssueSessionId(
+  ctx: PluginContext,
+  issueId: string,
+  issueIdentifier?: string | null,
+) {
+  const mapping = await getSessionMappingRecord(ctx, issueId);
+  const mappedSessionId = typeof mapping?.data.sessionId === "string" && mapping.data.sessionId.trim()
+    ? mapping.data.sessionId
+    : null;
+  return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
 }
 
 export async function upsertMigrationReport(
