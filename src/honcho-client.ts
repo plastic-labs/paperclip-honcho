@@ -1,7 +1,8 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
-import { peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "./ids.js";
+import { resolveCanonicalWorkspaceId } from "./entities.js";
+import { peerIdForAgent, peerIdForUser, sessionIdForIssue } from "./ids.js";
 import type {
   AskPeerParams,
   HonchoChatResult,
@@ -164,6 +165,7 @@ export class HonchoClient {
   private readonly ensuredWorkspaces = new Set<string>();
   private readonly ensuredSessions = new Set<string>();
   private readonly ensuredPeers = new Set<string>();
+  private readonly resolvedWorkspaceIds = new Map<string, string>();
 
   constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
@@ -171,8 +173,14 @@ export class HonchoClient {
     this.apiKey = input.apiKey;
   }
 
-  workspaceId(companyId: string): string {
-    return workspaceIdForCompany(companyId, this.config.workspacePrefix);
+  private async workspaceId(companyId: string): Promise<string> {
+    const cachedWorkspaceId = this.resolvedWorkspaceIds.get(companyId);
+    if (cachedWorkspaceId) {
+      return cachedWorkspaceId;
+    }
+    const workspaceId = await resolveCanonicalWorkspaceId(this.ctx, companyId, this.config.workspacePrefix);
+    this.resolvedWorkspaceIds.set(companyId, workspaceId);
+    return workspaceId;
   }
 
   sessionId(issueId: string): string {
@@ -180,7 +188,7 @@ export class HonchoClient {
   }
 
   async ensureWorkspace(companyId: string): Promise<string> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
       return workspaceId;
     }
@@ -199,7 +207,7 @@ export class HonchoClient {
   }
 
   async ensureCompanyWorkspace(companyId: string, company: Company | null): Promise<string> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
       return workspaceId;
     }
@@ -351,7 +359,7 @@ export class HonchoClient {
 
   async appendMessagesToSession(companyId: string, sessionId: string, messages: HonchoMessageInput[]): Promise<void> {
     if (messages.length === 0) return;
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     await requestJson(
       this.ctx,
       this.config,
@@ -382,7 +390,7 @@ export class HonchoClient {
     userPeerId?: string | null,
     issueId?: string | null,
   ): Promise<HonchoIssueContext> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     const query = new URLSearchParams({
       summary: "true",
       tokens: String(DEFAULT_CONTEXT_TOKEN_LIMIT),
@@ -432,7 +440,7 @@ export class HonchoClient {
     agentId: string,
     params: { issueId?: string | null; summaryOnly?: boolean },
   ): Promise<string | null> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     const payload = await requestJson(
       this.ctx,
       this.config,
@@ -462,7 +470,7 @@ export class HonchoClient {
         observe_others: this.config.observe_others,
       });
     }
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     const scopedSessionId = params.scope === "workspace" ? undefined : params.issueId ? this.sessionId(params.issueId) : undefined;
     const payload = await requestJson(
       this.ctx,
