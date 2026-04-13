@@ -10,6 +10,7 @@ All notable changes to `@honcho-ai/paperclip-honcho` will be documented in this 
 
 ### Fixed
 - Fixed `agent_profile_files` imports so they create and map agent peers instead of incorrectly falling through the owner peer path.
+- Restored canonical agent peer IDs so Honcho peers consistently use the Paperclip agent ID instead of drifting to URL-key-based names.
 - Fixed session and workspace lookup paths to honor persisted mappings, keeping reads, writes, and repair actions aligned with previously created Honcho resources.
 
 ## [0.1.1] - 2026-04-10
