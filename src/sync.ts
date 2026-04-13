@@ -43,7 +43,6 @@ import {
 import { createHonchoClient } from "./honcho-client.js";
 import {
   buildMigrationReportPayload,
-  buildWorkspaceId,
   ensureActorPeerMapping,
   getImportLedgerRecord,
   listJobsForUi,
@@ -83,6 +82,13 @@ import type {
   SyncIssueResult,
   SyncableIssueResource,
 } from "./types.js";
+
+type MigrationCandidatesLoader = (
+  ctx: PluginContext,
+  companyId: string,
+) => Promise<MigrationSourceCandidate[]>;
+
+let migrationCandidatesLoaderOverride: MigrationCandidatesLoader | null = null;
 
 function peerIdFromActor(actor: HonchoActor): string {
   if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
@@ -545,6 +551,20 @@ async function buildMigrationCandidates(
   });
 }
 
+async function loadMigrationCandidates(
+  ctx: PluginContext,
+  companyId: string,
+): Promise<MigrationSourceCandidate[]> {
+  if (migrationCandidatesLoaderOverride) {
+    return await migrationCandidatesLoaderOverride(ctx, companyId);
+  }
+  return await buildMigrationCandidates(ctx, companyId);
+}
+
+export function setMigrationCandidatesLoaderForTests(loader: MigrationCandidatesLoader | null) {
+  migrationCandidatesLoaderOverride = loader;
+}
+
 function buildMigrationPreview(companyId: string, candidates: MigrationSourceCandidate[]): MigrationPreview {
   const comments = candidates.filter((candidate) => candidate.sourceType === "issue_comments");
   const documents = candidates.filter((candidate) => candidate.sourceType === "issue_documents");
@@ -630,7 +650,7 @@ async function ensureMigrationCandidateImported(
 
   const company = await ctx.companies.get(companyId);
   const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix);
+  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", workspaceId);
 
   if (candidate.issueId) {
     const issue = await ctx.issues.get(candidate.issueId, companyId);
@@ -666,10 +686,14 @@ async function ensureMigrationCandidateImported(
   } else {
     const isGuidance = candidate.sourceType === "workspace_guidance_files";
     const isAgentProfile = candidate.sourceType === "agent_profile_files";
+    const agentProfileId = isAgentProfile && typeof candidate.metadata.authorId === "string"
+      ? String(candidate.metadata.authorId).replace(/^agent:/, "")
+      : null;
+    const agentProfile = agentProfileId ? await ctx.agents.get(agentProfileId, companyId) : null;
     const peerId = isGuidance
       ? systemPeerId()
-      : isAgentProfile && typeof candidate.metadata.authorId === "string"
-        ? peerIdForAgent(String(candidate.metadata.authorId).replace(/^agent:/, ""))
+      : agentProfile
+        ? peerIdForAgent(agentProfile.id)
         : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {
@@ -677,6 +701,9 @@ async function ensureMigrationCandidateImported(
         system_id: "paperclip",
       });
       await upsertSystemPeerMapping(ctx, companyId);
+    } else if (agentProfile) {
+      await client.ensureAgentPeer(companyId, agentProfile);
+      await upsertAgentPeerMapping(ctx, companyId, agentProfile);
     } else {
       await client.ensurePeer(companyId, peerId, {
         company_id: companyId,
@@ -684,8 +711,8 @@ async function ensureMigrationCandidateImported(
       });
       await upsertOwnerPeerMapping(ctx, companyId);
     }
-    const sessionId = isAgentProfile && typeof candidate.metadata.authorId === "string"
-      ? bootstrapSessionIdForAgent(String(candidate.metadata.authorId).replace(/^agent:/, ""))
+    const sessionId = agentProfileId
+      ? bootstrapSessionIdForAgent(agentProfileId)
       : bootstrapSessionIdForCompany(companyId);
     await client.ensureRawSession(companyId, sessionId, {
       source_system: "paperclip",
@@ -694,9 +721,7 @@ async function ensureMigrationCandidateImported(
     });
     await upsertBootstrapSessionMapping(ctx, companyId, {
       kind: isAgentProfile ? "agent" : "company",
-      agentId: isAgentProfile && typeof candidate.metadata.authorId === "string"
-        ? String(candidate.metadata.authorId).replace(/^agent:/, "")
-        : undefined,
+      agentId: agentProfileId ?? undefined,
       title: isGuidance ? "Workspace Guidance" : "Legacy Memory",
       workspaceId,
     });
@@ -744,7 +769,7 @@ export async function scanMigrationSources(ctx: PluginContext, companyId: string
   });
 
   try {
-    const preview = buildMigrationPreview(companyId, await buildMigrationCandidates(ctx, companyId));
+    const preview = buildMigrationPreview(companyId, await loadMigrationCandidates(ctx, companyId));
     await patchCompanySyncStatus(ctx, companyId, {
       migrationStatus: "preview_ready",
       latestMigrationPreview: preview,
@@ -783,7 +808,7 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
     throw new Error(validation.errors?.join("; ") ?? "Honcho config is invalid");
   }
   const preview = (await getCompanySyncStatus(ctx, companyId)).latestMigrationPreview ?? await scanMigrationSources(ctx, companyId);
-  const candidates = await buildMigrationCandidates(ctx, companyId);
+  const candidates = await loadMigrationCandidates(ctx, companyId);
   const client = await createHonchoClient({ ctx, config });
   let processed = 0;
   let succeeded = 0;
@@ -907,7 +932,7 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
   try {
     await client.probeConnection(companyId, company);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-    await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "created");
+    await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "created", workspaceId);
 
     const agents = await listCompanyAgents(ctx, companyId);
     for (const agent of agents) {
@@ -1193,8 +1218,8 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   const client = await createHonchoClient({ ctx, config });
   let repaired = 0;
 
-  await client.ensureCompanyWorkspace(companyId, company);
-  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped");
+  const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
+  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", workspaceId);
   repaired += 1;
 
   const agents = await listCompanyAgents(ctx, companyId);
@@ -1205,7 +1230,6 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   }
 
   const issues = await listCompanyIssues(ctx, companyId);
-  const workspaceId = buildWorkspaceId(companyId, config.workspacePrefix);
   for (const issue of issues) {
     await client.ensureIssueSession(issue, company);
     await upsertSessionMapping(ctx, issue, workspaceId);

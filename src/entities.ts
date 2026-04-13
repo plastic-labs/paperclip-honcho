@@ -44,20 +44,29 @@ export async function upsertWorkspaceMapping(
   companyId: string,
   workspacePrefix: string,
   status: "created" | "existing" | "mapped" = "mapped",
+  workspaceId?: string,
 ) {
-  const workspaceId = workspaceIdForCompany(companyId, workspacePrefix);
+  const existing = await getWorkspaceMappingRecord(ctx, companyId);
+  const mappedWorkspaceId = typeof existing?.data.workspaceId === "string" && existing.data.workspaceId.trim()
+    ? existing.data.workspaceId
+    : null;
+  const mappedWorkspacePrefix = typeof existing?.data.workspacePrefix === "string" && existing.data.workspacePrefix.trim()
+    ? existing.data.workspacePrefix
+    : null;
+  const canonicalWorkspaceId = mappedWorkspaceId ?? workspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  const canonicalWorkspacePrefix = mappedWorkspacePrefix ?? workspacePrefix;
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
     scopeKind: "company",
     scopeId: companyId,
     externalId: `paperclip:company:${companyId}`,
-    title: company?.name ?? workspaceId,
+    title: company?.name ?? canonicalWorkspaceId,
     status,
     data: {
       companyId,
       companyName: company?.name ?? null,
-      workspaceId,
-      workspacePrefix,
+      workspaceId: canonicalWorkspaceId,
+      workspacePrefix: canonicalWorkspacePrefix,
       updatedAt: new Date().toISOString(),
     },
   });
@@ -68,6 +77,11 @@ export async function upsertSessionMapping(
   issue: Issue,
   workspaceId: string,
 ) {
+  const existing = await getSessionMappingRecord(ctx, issue.id);
+  const mappedSessionId = typeof existing?.data.sessionId === "string" && existing.data.sessionId.trim()
+    ? existing.data.sessionId
+    : null;
+  const sessionId = mappedSessionId ?? sessionIdForIssue(issue.id, issue.identifier ?? null);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.sessionMapping,
     scopeKind: "issue",
@@ -79,7 +93,7 @@ export async function upsertSessionMapping(
       companyId: issue.companyId,
       issueId: issue.id,
       issueIdentifier: issue.identifier ?? null,
-      sessionId: sessionIdForIssue(issue.id),
+      sessionId,
       workspaceId,
       issueTitle: issue.title,
       issueStatus: issue.status,
@@ -294,6 +308,52 @@ export async function getImportLedgerRecord(ctx: PluginContext, companyId: strin
     limit: 1,
   });
   return records[0] ?? null;
+}
+
+export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: string) {
+  const records = await ctx.entities.list({
+    entityType: ENTITY_TYPES.workspaceMapping,
+    scopeKind: "company",
+    scopeId: companyId,
+    externalId: `paperclip:company:${companyId}`,
+    limit: 1,
+  });
+  return records[0] ?? null;
+}
+
+export async function getSessionMappingRecord(ctx: PluginContext, issueId: string) {
+  const records = await ctx.entities.list({
+    entityType: ENTITY_TYPES.sessionMapping,
+    scopeKind: "issue",
+    scopeId: issueId,
+    externalId: `paperclip:issue:${issueId}`,
+    limit: 1,
+  });
+  return records[0] ?? null;
+}
+
+export async function resolveCanonicalWorkspaceId(
+  ctx: PluginContext,
+  companyId: string,
+  workspacePrefix: string,
+) {
+  const mapping = await getWorkspaceMappingRecord(ctx, companyId);
+  const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
+    ? mapping.data.workspaceId
+    : null;
+  return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+}
+
+export async function resolveCanonicalIssueSessionId(
+  ctx: PluginContext,
+  issueId: string,
+  issueIdentifier?: string | null,
+) {
+  const mapping = await getSessionMappingRecord(ctx, issueId);
+  const mappedSessionId = typeof mapping?.data.sessionId === "string" && mapping.data.sessionId.trim()
+    ? mapping.data.sessionId
+    : null;
+  return mappedSessionId ?? sessionIdForIssue(issueId, issueIdentifier);
 }
 
 export async function upsertMigrationReport(

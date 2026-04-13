@@ -1,7 +1,8 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
-import { peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "./ids.js";
+import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
+import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {
   AskPeerParams,
   HonchoChatResult,
@@ -164,6 +165,8 @@ export class HonchoClient {
   private readonly ensuredWorkspaces = new Set<string>();
   private readonly ensuredSessions = new Set<string>();
   private readonly ensuredPeers = new Set<string>();
+  private readonly resolvedWorkspaceIds = new Map<string, string>();
+  private readonly resolvedSessionIds = new Map<string, string>();
 
   constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
@@ -171,16 +174,34 @@ export class HonchoClient {
     this.apiKey = input.apiKey;
   }
 
-  workspaceId(companyId: string): string {
-    return workspaceIdForCompany(companyId, this.config.workspacePrefix);
+  private async workspaceId(companyId: string): Promise<string> {
+    const cachedWorkspaceId = this.resolvedWorkspaceIds.get(companyId);
+    if (cachedWorkspaceId) {
+      return cachedWorkspaceId;
+    }
+    const workspaceId = await resolveCanonicalWorkspaceId(this.ctx, companyId, this.config.workspacePrefix);
+    this.resolvedWorkspaceIds.set(companyId, workspaceId);
+    return workspaceId;
   }
 
-  sessionId(issueId: string): string {
-    return sessionIdForIssue(issueId);
+  private async sessionId(companyId: string, issueId: string, issue?: Issue | null): Promise<string> {
+    const cacheKey = `${companyId}:${issueId}`;
+    const cachedSessionId = this.resolvedSessionIds.get(cacheKey);
+    if (cachedSessionId) {
+      return cachedSessionId;
+    }
+    const resolvedIssue = issue ?? await this.ctx.issues.get(issueId, companyId);
+    const sessionId = await resolveCanonicalIssueSessionId(
+      this.ctx,
+      issueId,
+      resolvedIssue?.identifier ?? null,
+    );
+    this.resolvedSessionIds.set(cacheKey, sessionId);
+    return sessionId;
   }
 
   async ensureWorkspace(companyId: string): Promise<string> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
       return workspaceId;
     }
@@ -199,7 +220,7 @@ export class HonchoClient {
   }
 
   async ensureCompanyWorkspace(companyId: string, company: Company | null): Promise<string> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
       return workspaceId;
     }
@@ -288,7 +309,7 @@ export class HonchoClient {
   }
 
   async ensureSession(companyId: string, issueId: string, metadata?: Record<string, unknown>): Promise<string> {
-    return await this.ensureRawSession(companyId, this.sessionId(issueId), {
+    return await this.ensureRawSession(companyId, await this.sessionId(companyId, issueId), {
       source_system: "paperclip",
       company_id: companyId,
       issue_id: issueId,
@@ -315,7 +336,7 @@ export class HonchoClient {
 
   async ensureIssueSession(issue: Issue, company: Company | null): Promise<string> {
     const workspaceId = await this.ensureCompanyWorkspace(issue.companyId, company);
-    const sessionId = this.sessionId(issue.id);
+    const sessionId = await this.sessionId(issue.companyId, issue.id, issue);
     const cacheKey = `${workspaceId}:${sessionId}`;
     if (this.ensuredSessions.has(cacheKey)) {
       return sessionId;
@@ -351,7 +372,7 @@ export class HonchoClient {
 
   async appendMessagesToSession(companyId: string, sessionId: string, messages: HonchoMessageInput[]): Promise<void> {
     if (messages.length === 0) return;
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     await requestJson(
       this.ctx,
       this.config,
@@ -382,7 +403,7 @@ export class HonchoClient {
     userPeerId?: string | null,
     issueId?: string | null,
   ): Promise<HonchoIssueContext> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     const query = new URLSearchParams({
       summary: "true",
       tokens: String(DEFAULT_CONTEXT_TOKEN_LIMIT),
@@ -432,7 +453,7 @@ export class HonchoClient {
     agentId: string,
     params: { issueId?: string | null; summaryOnly?: boolean },
   ): Promise<string | null> {
-    const workspaceId = this.workspaceId(companyId);
+    const workspaceId = await this.workspaceId(companyId);
     const payload = await requestJson(
       this.ctx,
       this.config,
@@ -441,7 +462,7 @@ export class HonchoClient {
       {
         method: "POST",
         body: JSON.stringify({
-          ...(params.issueId ? { session_id: this.sessionId(params.issueId) } : {}),
+          ...(params.issueId ? { session_id: await this.sessionId(companyId, params.issueId) } : {}),
           ...(params.summaryOnly ? { summary_only: true } : {}),
         }),
       },
@@ -462,8 +483,12 @@ export class HonchoClient {
         observe_others: this.config.observe_others,
       });
     }
-    const workspaceId = this.workspaceId(companyId);
-    const scopedSessionId = params.scope === "workspace" ? undefined : params.issueId ? this.sessionId(params.issueId) : undefined;
+    const workspaceId = await this.workspaceId(companyId);
+    const scopedSessionId = params.scope === "workspace"
+      ? undefined
+      : params.issueId
+        ? await this.sessionId(companyId, params.issueId)
+        : undefined;
     const payload = await requestJson(
       this.ctx,
       this.config,
@@ -503,7 +528,7 @@ export class HonchoClient {
         body: JSON.stringify({
           target: params.targetPeerId,
           query: params.query,
-          session_id: params.issueId ? this.sessionId(params.issueId) : undefined,
+          session_id: params.issueId ? await this.sessionId(companyId, params.issueId) : undefined,
         }),
       },
     );

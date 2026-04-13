@@ -28,7 +28,10 @@ export function peerIdForUser(userId: string): string {
   return joinHonchoId(["user", userId]);
 }
 
-export function sessionIdForIssue(issueId: string): string {
+export function sessionIdForIssue(issueId: string, issueIdentifier?: string | null): string {
+  if (typeof issueIdentifier === "string" && issueIdentifier.trim()) {
+    return joinHonchoId([issueIdentifier]);
+  }
   return joinHonchoId(["issue", issueId]);
 }
 
