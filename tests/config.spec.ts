@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PLUGIN_VERSION } from "../src/constants.js";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import manifest from "../src/manifest.js";
 import plugin from "../src/worker.js";
@@ -10,6 +11,10 @@ afterEach(() => {
 });
 
 describe("honcho config", () => {
+  it("uses the shared plugin version constant in the manifest", () => {
+    expect(manifest.version).toBe(PLUGIN_VERSION);
+  });
+
   it("declares the settings page and issue memory tab using the current plugin framework slots", () => {
     expect(manifest.capabilities).toEqual(expect.arrayContaining([
       "instance.settings.register",

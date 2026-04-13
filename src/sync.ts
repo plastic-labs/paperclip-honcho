@@ -585,16 +585,21 @@ async function runIssueSyncExclusive<T>(companyId: string, issueId: string, work
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  issueSyncQueue.set(queueKey, previous.then(() => current));
+  const queued = previous.then(() => current);
+  issueSyncQueue.set(queueKey, queued);
   await previous;
   try {
     return await work();
   } finally {
     release?.();
-    if (issueSyncQueue.get(queueKey) === current) {
+    if (issueSyncQueue.get(queueKey) === queued) {
       issueSyncQueue.delete(queueKey);
     }
   }
+}
+
+export function getIssueSyncQueueSizeForTests(): number {
+  return issueSyncQueue.size;
 }
 
 function buildMigrationPreview(companyId: string, candidates: MigrationSourceCandidate[]): MigrationPreview {
@@ -722,7 +727,12 @@ async function ensureMigrationCandidateImported(
     const peerId = isGuidance
       ? systemPeerId()
       : agentProfile
-        ? peerIdForAgent(agentProfile.id)
+        ? await resolveCanonicalAgentPeerId(
+          ctx,
+          companyId,
+          agentProfile.id,
+          agentProfile.urlKey ?? null,
+        )
         : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {

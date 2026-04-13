@@ -380,6 +380,12 @@ describe("honcho memory jobs", () => {
       }),
     });
     expect(peerRequest?.body?.metadata).not.toHaveProperty("owner_id");
+
+    const messageRequest = requestsMatching(requests, "/messages")[0];
+    const [message] = ((messageRequest?.body?.messages ?? []) as Array<Record<string, unknown>>);
+    expect(message).toMatchObject({
+      peer_id: "agent_agent-one",
+    });
   });
 
   it("initialize-memory recreates missing workspace/session mappings without reimporting memory", async () => {

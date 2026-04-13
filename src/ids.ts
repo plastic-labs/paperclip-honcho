@@ -21,8 +21,11 @@ export function workspaceIdForCompany(companyId: string, workspacePrefix: string
 }
 
 export function peerIdForAgent(agentId: string, agentUrlKey?: string | null): string {
-  if (typeof agentUrlKey === "string" && agentUrlKey.trim()) {
-    return joinHonchoId(["agent", agentUrlKey]);
+  if (typeof agentUrlKey === "string") {
+    const safeUrlKey = toHonchoSafeSegment(agentUrlKey);
+    if (safeUrlKey) {
+      return joinHonchoId(["agent", safeUrlKey]);
+    }
   }
   return joinHonchoId(["agent", agentId]);
 }
