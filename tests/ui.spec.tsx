@@ -29,7 +29,6 @@ type FetchStubOptions = {
 
 type PluginHookStubOptions = {
   testConnectionAction?: ReturnType<typeof vi.fn>;
-  repairMappingsAction?: ReturnType<typeof vi.fn>;
   memoryStatusOverrides?: Record<string, unknown>;
 };
 
@@ -176,7 +175,6 @@ function installPluginHookStubs(options: PluginHookStubOptions = {}) {
 
   mockUsePluginAction.mockImplementation((key: string) => {
     if (key === ACTION_KEYS.testConnection) return options.testConnectionAction ?? vi.fn(async () => ({ ok: true }));
-    if (key === ACTION_KEYS.repairMappings) return options.repairMappingsAction ?? vi.fn(async () => ({ ok: true }));
     if (key === ACTION_KEYS.probePromptContext) return vi.fn(async () => ({ status: "inactive", preview: null }));
     return vi.fn(async () => ({ ok: true }));
   });

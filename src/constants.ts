@@ -76,7 +76,6 @@ export const DATA_KEYS = {
 export const ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  repairMappings: "repair-mappings",
   resyncIssue: "resync-issue",
 } as const;
 

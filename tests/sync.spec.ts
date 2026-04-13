@@ -71,6 +71,37 @@ describe("honcho sync", () => {
     expect(state.lastSyncedCommentId).toBe("c_2");
   });
 
+  it("serializes concurrent comment syncs so the same comment is not appended multiple times", async () => {
+    const { requests } = installFetchMock({
+      delayOn: [{ pattern: "/messages", ms: 25 }],
+    });
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await Promise.all([
+      harness.emit("issue.comment.created", { commentId: "c_2" }, {
+        entityId: "iss_1",
+        entityType: "issue",
+        companyId: "co_1",
+      }),
+      harness.emit("issue.comment.created", { commentId: "c_2" }, {
+        entityId: "iss_1",
+        entityType: "issue",
+        companyId: "co_1",
+      }),
+      harness.emit("issue.comment.created", { commentId: "c_2" }, {
+        entityId: "iss_1",
+        entityType: "issue",
+        companyId: "co_1",
+      }),
+    ]);
+
+    const messageRequests = requestsMatching(requests, "/messages");
+    expect(messageRequests).toHaveLength(1);
+    const messages = (messageRequests[0]?.body?.messages ?? []) as Array<Record<string, unknown>>;
+    expect(messages.map((message) => (message.metadata as Record<string, unknown>)?.commentId)).toEqual(["c_1", "c_2", null]);
+  });
+
   it("marks blank comments as synced without appending empty Honcho messages", async () => {
     const { requests } = installFetchMock();
     const fixtures = buildDefaultFixtures();

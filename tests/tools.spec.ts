@@ -141,7 +141,7 @@ describe("honcho tools", () => {
     await plugin.definition.setup(harness.ctx);
 
     await expect(
-      harness.executeTool("honcho_ask_peer", { targetPeerId: "agent_agent_1", query: "Status?", issueId: "iss_1" }, {
+      harness.executeTool("honcho_ask_peer", { targetPeerId: "agent_agent-one", query: "Status?", issueId: "iss_1" }, {
         companyId: "co_1",
         projectId: "proj_1",
         agentId: "agent_1",
@@ -161,7 +161,7 @@ describe("honcho tools", () => {
     await plugin.definition.setup(harness.ctx);
 
     const result = await harness.executeTool("honcho_ask_peer", {
-      targetPeerId: "agent_agent_1",
+      targetPeerId: "agent_agent-one",
       query: "Status?",
       issueId: "iss_1",
     }, {

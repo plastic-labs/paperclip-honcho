@@ -21,7 +21,6 @@ import {
   loadMigrationJobStatusData,
   loadMigrationPreviewData,
   probePromptContext,
-  repairMappings,
   replayIssue,
   scanMigrationSources,
   searchMemory,
@@ -104,11 +103,6 @@ const plugin = definePlugin({
         agentId: typeof params.agentId === "string" ? params.agentId : null,
         prompt: typeof params.prompt === "string" ? params.prompt : null,
       });
-    });
-
-    ctx.actions.register(ACTION_KEYS.repairMappings, async (params) => {
-      const companyId = requireString(params.companyId, "companyId");
-      return await repairMappings(ctx, companyId);
     });
 
     ctx.jobs.register(JOB_KEYS.initializeMemory, async () => {

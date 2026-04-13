@@ -1,7 +1,7 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
-import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
+import { resolveCanonicalAgentPeerId, resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
 import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {
   AskPeerParams,
@@ -167,6 +167,7 @@ export class HonchoClient {
   private readonly ensuredPeers = new Set<string>();
   private readonly resolvedWorkspaceIds = new Map<string, string>();
   private readonly resolvedSessionIds = new Map<string, string>();
+  private readonly resolvedAgentPeerIds = new Map<string, string>();
 
   constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
@@ -198,6 +199,23 @@ export class HonchoClient {
     );
     this.resolvedSessionIds.set(cacheKey, sessionId);
     return sessionId;
+  }
+
+  private async agentPeerId(companyId: string, agentId: string, agent?: Agent | null): Promise<string> {
+    const cacheKey = `${companyId}:${agentId}`;
+    const cachedPeerId = this.resolvedAgentPeerIds.get(cacheKey);
+    if (cachedPeerId) {
+      return cachedPeerId;
+    }
+    const resolvedAgent = agent ?? await this.ctx.agents.get(agentId, companyId);
+    const peerId = await resolveCanonicalAgentPeerId(
+      this.ctx,
+      companyId,
+      agentId,
+      resolvedAgent?.urlKey ?? null,
+    );
+    this.resolvedAgentPeerIds.set(cacheKey, peerId);
+    return peerId;
   }
 
   async ensureWorkspace(companyId: string): Promise<string> {
@@ -275,13 +293,15 @@ export class HonchoClient {
   }
 
   async ensureAgentPeer(companyId: string, agent: Agent): Promise<string> {
+    const peerId = await this.agentPeerId(companyId, agent.id, agent);
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id),
+      peerId,
       {
         company_id: companyId,
         agent_id: agent.id,
         agent_name: agent.name,
+        agent_url_key: agent.urlKey ?? null,
         agent_role: agent.role,
         agent_title: agent.title,
       },
@@ -454,11 +474,12 @@ export class HonchoClient {
     params: { issueId?: string | null; summaryOnly?: boolean },
   ): Promise<string | null> {
     const workspaceId = await this.workspaceId(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -472,10 +493,11 @@ export class HonchoClient {
 
   async searchMemory(companyId: string, agentId: string, params: SearchMemoryParams): Promise<HonchoSearchResult[]> {
     const agent = await this.ctx.agents.get(agentId, companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId, agent);
     if (agent) {
       await this.ensureAgentPeer(companyId, agent);
     } else {
-      await this.ensurePeer(companyId, peerIdForAgent(agentId), {
+      await this.ensurePeer(companyId, agentPeerId, {
         company_id: companyId,
         agent_id: agentId,
       }, {
@@ -493,7 +515,7 @@ export class HonchoClient {
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -518,11 +540,12 @@ export class HonchoClient {
 
   async askPeer(companyId: string, agentId: string, params: AskPeerParams): Promise<HonchoChatResult> {
     const workspaceId = await this.ensureWorkspace(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/chat`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/chat`,
       {
         method: "POST",
         body: JSON.stringify({

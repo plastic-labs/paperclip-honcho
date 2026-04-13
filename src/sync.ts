@@ -47,6 +47,7 @@ import {
   getImportLedgerRecord,
   listJobsForUi,
   listMappingCounts,
+  resolveCanonicalAgentPeerId,
   upsertAgentPeerMapping,
   upsertBootstrapSessionMapping,
   upsertFileImportSource,
@@ -89,9 +90,17 @@ type MigrationCandidatesLoader = (
 ) => Promise<MigrationSourceCandidate[]>;
 
 let migrationCandidatesLoaderOverride: MigrationCandidatesLoader | null = null;
+const issueSyncQueue = new Map<string, Promise<void>>();
 
-function peerIdFromActor(actor: HonchoActor): string {
-  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
+async function resolvePeerIdFromActor(
+  ctx: PluginContext,
+  companyId: string,
+  actor: HonchoActor,
+): Promise<string> {
+  if (actor.authorType === "agent") {
+    const agent = await ctx.agents.get(actor.authorId, companyId);
+    return await resolveCanonicalAgentPeerId(ctx, companyId, actor.authorId, agent?.urlKey ?? null);
+  }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -303,6 +312,7 @@ async function fetchIssueResources(
 }
 
 async function buildCommentMessages(
+  ctx: PluginContext,
   issue: Issue,
   comments: IssueComment[],
   config: HonchoResolvedConfig,
@@ -322,9 +332,10 @@ async function buildCommentMessages(
     const normalized = normalizeAndFilterMessage(comment.body, config);
     if (!normalized) continue;
     const actor = actorFromComment(comment);
+    const peerId = await resolvePeerIdFromActor(ctx, issue.companyId, actor);
     messages.push({
       content: normalized.content,
-      peerId: peerIdFromActor(actor),
+      peerId,
       createdAt: new Date(comment.createdAt).toISOString(),
       metadata: {
         ...buildCommentProvenance(issue, comment, actor),
@@ -336,12 +347,13 @@ async function buildCommentMessages(
   return messages;
 }
 
-function buildDocumentMessages(
+async function buildDocumentMessages(
+  ctx: PluginContext,
   issue: Issue,
   documents: IssueDocumentBundle[],
   config: HonchoResolvedConfig,
   lastSyncedRevisionId: string | null,
-): HonchoMessageInput[] {
+): Promise<HonchoMessageInput[]> {
   const messages: HonchoMessageInput[] = [];
   let unlocked = lastSyncedRevisionId == null;
 
@@ -354,6 +366,7 @@ function buildDocumentMessages(
         continue;
       }
       const actor = actorFromDocumentRevision(revision);
+      const peerId = await resolvePeerIdFromActor(ctx, issue.companyId, actor);
       for (const section of splitDocumentIntoSections(
         bundle.document,
         revision,
@@ -364,7 +377,7 @@ function buildDocumentMessages(
         if (!normalized) continue;
         messages.push({
           content: normalized.content,
-          peerId: peerIdFromActor(actor),
+          peerId,
           createdAt: new Date(revision.createdAt).toISOString(),
           metadata: {
             ...buildDocumentProvenance(issue, revision, actor),
@@ -565,6 +578,25 @@ export function setMigrationCandidatesLoaderForTests(loader: MigrationCandidates
   migrationCandidatesLoaderOverride = loader;
 }
 
+async function runIssueSyncExclusive<T>(companyId: string, issueId: string, work: () => Promise<T>): Promise<T> {
+  const queueKey = `${companyId}:${issueId}`;
+  const previous = issueSyncQueue.get(queueKey) ?? Promise.resolve();
+  let release: (() => void) | null = null;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  issueSyncQueue.set(queueKey, previous.then(() => current));
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release?.();
+    if (issueSyncQueue.get(queueKey) === current) {
+      issueSyncQueue.delete(queueKey);
+    }
+  }
+}
+
 function buildMigrationPreview(companyId: string, candidates: MigrationSourceCandidate[]): MigrationPreview {
   const comments = candidates.filter((candidate) => candidate.sourceType === "issue_comments");
   const documents = candidates.filter((candidate) => candidate.sourceType === "issue_documents");
@@ -575,9 +607,6 @@ function buildMigrationPreview(companyId: string, candidates: MigrationSourceCan
   }
   if (documents.length === 0) {
     warnings.push("No issue document revisions were found for this company.");
-  }
-  if (files.length === 0) {
-    warnings.push("Legacy workspace file import is unavailable in the public-host-compatible Honcho package.");
   }
   return {
     companyId,
@@ -669,7 +698,7 @@ async function ensureMigrationCandidateImported(
 
     await client.appendMessages(companyId, issue.id, [{
       content: candidate.content,
-      peerId: peerIdFromActor(actor),
+      peerId: await resolvePeerIdFromActor(ctx, companyId, actor),
       createdAt: candidate.createdAt,
       metadata: candidate.metadata as HonchoMessageInput["metadata"],
     }]);
@@ -931,14 +960,8 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
 
   try {
     await client.probeConnection(companyId, company);
+    await repairMappings(ctx, companyId);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-    await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "created", workspaceId);
-
-    const agents = await listCompanyAgents(ctx, companyId);
-    for (const agent of agents) {
-      await client.ensureAgentPeer(companyId, agent);
-      await upsertAgentPeerMapping(ctx, companyId, agent);
-    }
 
     const preview = await scanMigrationSources(ctx, companyId);
     const countsBefore = await listMappingCounts(ctx, companyId);
@@ -1017,88 +1040,90 @@ export async function syncIssue(
   companyId: string,
   options: SyncIssueOptions = {},
 ): Promise<SyncIssueResult> {
-  const config = await getResolvedConfig(ctx);
-  const status = await getIssueSyncStatus(ctx, issueId);
-  const replay = options.replay === true;
-  const resources = await fetchIssueResources(ctx, issueId, companyId, config);
-  const client = await createHonchoClient({ ctx, config });
+  return await runIssueSyncExclusive(companyId, issueId, async () => {
+    const config = await getResolvedConfig(ctx);
+    const status = await getIssueSyncStatus(ctx, issueId);
+    const replay = options.replay === true;
+    const resources = await fetchIssueResources(ctx, issueId, companyId, config);
+    const client = await createHonchoClient({ ctx, config });
 
-  await patchIssueSyncStatus(ctx, issueId, {
-    replayInProgress: replay,
-    replayRequestedAt: replay ? new Date().toISOString() : status.replayRequestedAt,
-  });
+    await patchIssueSyncStatus(ctx, issueId, {
+      replayInProgress: replay,
+      replayRequestedAt: replay ? new Date().toISOString() : status.replayRequestedAt,
+    });
 
-  try {
-    await ensureIssueTopology(ctx, resources, client, config);
+    try {
+      await ensureIssueTopology(ctx, resources, client, config);
 
-    const commentMessages = config.syncIssueComments
-      ? await buildCommentMessages(resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId)
-      : [];
-    const documentMessages = config.syncIssueDocuments
-      ? buildDocumentMessages(resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId)
-      : [];
-    const allMessages = [...commentMessages, ...documentMessages];
-    if (allMessages.length > 0) {
-      await client.appendMessages(resources.issue.companyId, resources.issue.id, allMessages);
-    } else {
-      await client.ensureIssueSession(resources.issue, resources.company);
+      const commentMessages = config.syncIssueComments
+        ? await buildCommentMessages(ctx, resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId)
+        : [];
+      const documentMessages = config.syncIssueDocuments
+        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId)
+        : [];
+      const allMessages = [...commentMessages, ...documentMessages];
+      if (allMessages.length > 0) {
+        await client.appendMessages(resources.issue.companyId, resources.issue.id, allMessages);
+      } else {
+        await client.ensureIssueSession(resources.issue, resources.company);
+      }
+
+      const lastComment = resources.comments.at(-1) ?? null;
+      const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
+      const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
+      await patchIssueSyncStatus(ctx, issueId, {
+        lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
+        lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
+        lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
+        lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
+        lastBackfillAt: new Date().toISOString(),
+        replayInProgress: false,
+        lastError: null,
+        latestAppendAt: allMessages.length > 0 ? new Date().toISOString() : status.latestAppendAt,
+        latestContextPreview: context.preview,
+        latestContextFetchedAt: new Date().toISOString(),
+      });
+      await patchCompanySyncStatus(ctx, companyId, {
+        connectionStatus: "connected",
+        workspaceStatus: "mapped",
+        peerStatus: "partial",
+        lastSuccessfulSyncAt: new Date().toISOString(),
+        lastError: null,
+      });
+      return {
+        issueId: resources.issue.id,
+        issueIdentifier: resources.issue.identifier ?? null,
+        syncedComments: commentMessages.length,
+        syncedDocumentSections: documentMessages.length,
+        syncedRuns: 0,
+        lastSyncedCommentId: lastComment?.id ?? null,
+        lastSyncedRunId: null,
+        replayed: replay,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const previous = await getCompanySyncStatus(ctx, companyId);
+      await patchCompanySyncStatus(ctx, companyId, {
+        pendingFailureCount: previous.pendingFailureCount + 1,
+        lastError: buildSyncErrorSummary({
+          message,
+          issueId,
+          commentId: options.commentIdHint ?? null,
+          documentKey: options.documentKeyHint ?? null,
+        }),
+      });
+      await patchIssueSyncStatus(ctx, issueId, {
+        replayInProgress: false,
+        lastError: buildSyncErrorSummary({
+          message,
+          issueId,
+          commentId: options.commentIdHint ?? null,
+          documentKey: options.documentKeyHint ?? null,
+        }),
+      });
+      throw error;
     }
-
-    const lastComment = resources.comments.at(-1) ?? null;
-    const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
-    const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
-    await patchIssueSyncStatus(ctx, issueId, {
-      lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
-      lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
-      lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
-      lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
-      lastBackfillAt: new Date().toISOString(),
-      replayInProgress: false,
-      lastError: null,
-      latestAppendAt: allMessages.length > 0 ? new Date().toISOString() : status.latestAppendAt,
-      latestContextPreview: context.preview,
-      latestContextFetchedAt: new Date().toISOString(),
-    });
-    await patchCompanySyncStatus(ctx, companyId, {
-      connectionStatus: "connected",
-      workspaceStatus: "mapped",
-      peerStatus: "partial",
-      lastSuccessfulSyncAt: new Date().toISOString(),
-      lastError: null,
-    });
-    return {
-      issueId: resources.issue.id,
-      issueIdentifier: resources.issue.identifier ?? null,
-      syncedComments: commentMessages.length,
-      syncedDocumentSections: documentMessages.length,
-      syncedRuns: 0,
-      lastSyncedCommentId: lastComment?.id ?? null,
-      lastSyncedRunId: null,
-      replayed: replay,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const previous = await getCompanySyncStatus(ctx, companyId);
-    await patchCompanySyncStatus(ctx, companyId, {
-      pendingFailureCount: previous.pendingFailureCount + 1,
-      lastError: buildSyncErrorSummary({
-        message,
-        issueId,
-        commentId: options.commentIdHint ?? null,
-        documentKey: options.documentKeyHint ?? null,
-      }),
-    });
-    await patchIssueSyncStatus(ctx, issueId, {
-      replayInProgress: false,
-      lastError: buildSyncErrorSummary({
-        message,
-        issueId,
-        commentId: options.commentIdHint ?? null,
-        documentKey: options.documentKeyHint ?? null,
-      }),
-    });
-    throw error;
-  }
+  });
 }
 
 export async function replayIssue(ctx: PluginContext, issueId: string, companyId: string): Promise<SyncIssueResult> {

@@ -184,9 +184,7 @@ describe("honcho memory jobs", () => {
         documents: 1,
         files: 0,
       },
-      warnings: expect.arrayContaining([
-        expect.stringContaining("Legacy workspace file import is unavailable"),
-      ]),
+      warnings: [],
     });
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
@@ -234,7 +232,7 @@ describe("honcho memory jobs", () => {
         }),
       }),
       expect.objectContaining({
-        peer_id: "agent_agent_1",
+        peer_id: "agent_agent-one",
         metadata: expect.objectContaining({
           contentType: "issue_document_section",
           documentRevisionId: "rev_2",
@@ -257,7 +255,7 @@ describe("honcho memory jobs", () => {
 
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent_1",
+      id: "agent_agent-one",
       configuration: expect.any(Object),
     });
     expect(peerRequest?.body).not.toHaveProperty("config");
@@ -368,15 +366,15 @@ describe("honcho memory jobs", () => {
       expect.objectContaining({
         externalId: "paperclip:agent:agent_1",
         data: expect.objectContaining({
-          peerId: "agent_agent_1",
+          peerId: "agent_agent-one",
           peerType: "agent",
         }),
       }),
     ]));
 
-    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_agent_1");
+    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_agent-one");
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent_1",
+      id: "agent_agent-one",
       metadata: expect.objectContaining({
         agent_id: "agent_1",
       }),
@@ -384,7 +382,7 @@ describe("honcho memory jobs", () => {
     expect(peerRequest?.body?.metadata).not.toHaveProperty("owner_id");
   });
 
-  it("repair-mappings recreates missing workspace/session mappings without reimporting memory", async () => {
+  it("initialize-memory recreates missing workspace/session mappings without reimporting memory", async () => {
     installFetchMock();
     const harness = createHonchoHarness();
 
@@ -403,11 +401,26 @@ describe("honcho memory jobs", () => {
         workspaceId: null,
       },
     });
-
-    const result = await harness.performAction<Record<string, unknown>>("repair-mappings", {
-      companyId: "co_1",
+    await harness.ctx.entities.upsert({
+      entityType: "honcho-session-mapping",
+      scopeKind: "issue",
+      scopeId: "iss_1",
+      externalId: "paperclip:issue:iss_1",
+      title: "PAP-1",
+      status: "missing",
+      data: {
+        companyId: "co_1",
+        issueId: "iss_1",
+        issueIdentifier: "PAP-1",
+        sessionId: null,
+        workspaceId: null,
+        issueTitle: "Auth regression",
+        issueStatus: "todo",
+        updatedAt: new Date().toISOString(),
+      },
     });
-    expect(result.repaired).toBeGreaterThan(0);
+
+    await harness.runJob("initialize-memory");
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",
@@ -418,9 +431,20 @@ describe("honcho memory jobs", () => {
     expect(workspaceMappings[0]?.data).toMatchObject({
       workspaceId: "paperclip_co_1",
     });
+
+    const sessionMappings = await harness.ctx.entities.list({
+      entityType: "honcho-session-mapping",
+      scopeKind: "issue",
+      scopeId: "iss_1",
+      externalId: "paperclip:issue:iss_1",
+    });
+    expect(sessionMappings[0]?.data).toMatchObject({
+      sessionId: "PAP-1",
+      workspaceId: "paperclip_co_1",
+    });
   });
 
-  it("repair-mappings preserves the stored workspace mapping when workspacePrefix changes later", async () => {
+  it("initialize-memory preserves the stored workspace mapping when workspacePrefix changes later", async () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -444,9 +468,7 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.performAction("repair-mappings", {
-      companyId: "co_1",
-    });
+    await harness.runJob("initialize-memory");
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",

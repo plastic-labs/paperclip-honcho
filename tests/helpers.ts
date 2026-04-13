@@ -65,6 +65,7 @@ type FetchMockOptions = {
   failOn?: Array<string | RegExp>;
   failOnceOn?: Array<string | RegExp>;
   rateLimitOnceOn?: Array<string | RegExp>;
+  delayOn?: Array<{ pattern: string | RegExp; ms: number }>;
   searchResults?: Array<Record<string, unknown>>;
   summaries?: string[];
   chatText?: string;
@@ -146,6 +147,11 @@ export function installFetchMock(options: FetchMockOptions = {}) {
             "retry-after": "0.01",
           },
         });
+      }
+    }
+    for (const delay of options.delayOn ?? []) {
+      if (matchesPattern(url, delay.pattern)) {
+        await new Promise((resolve) => setTimeout(resolve, delay.ms));
       }
     }
 
