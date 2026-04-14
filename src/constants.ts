@@ -18,6 +18,7 @@ export const DEFAULT_MIN_IMPORT_TEXT_LENGTH = 12;
 export const DEFAULT_FILE_SCAN_LIMIT = 100;
 export const DEFAULT_FILE_SCAN_MAX_DEPTH = 4;
 export const DEFAULT_SUMMARIZED_SEARCH_LIMIT = 3;
+export const DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
 
 export const LEGACY_ROOT_FILES = [
   "USER.md",

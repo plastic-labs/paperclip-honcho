@@ -376,6 +376,61 @@ describe("HonchoSettingsPage", () => {
     expect(screen.queryByText(/Timed out waiting for initialize-memory to complete\./)).toBeNull();
   });
 
+  it("allows initialization polling to continue past five minutes before timing out", async () => {
+    installFetchStub({
+      migrationJobStatusResponses: [
+        ...Array.from({ length: 10 }, (_, index) => ({
+          activeJobKey: "initialize-memory",
+          status: "running",
+          processed: index,
+          succeeded: index,
+          skipped: 0,
+          failed: 0,
+          currentSourceType: null,
+          currentEntityId: null,
+          lastError: null,
+          updatedAt: `2026-04-09T21:${String(39 + index).padStart(2, "0")}:00.000Z`,
+        })),
+        {
+          activeJobKey: "initialize-memory",
+          status: "complete",
+          processed: 10,
+          succeeded: 10,
+          skipped: 0,
+          failed: 0,
+          currentSourceType: null,
+          currentEntityId: null,
+          lastError: null,
+          updatedAt: "2026-04-09T21:49:00.000Z",
+        },
+      ],
+    });
+
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    vi.useFakeTimers();
+    let nowMs = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      const current = nowMs;
+      nowMs += 60_000;
+      return current;
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    const statusPolls = requestUrls.filter((url) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`));
+    expect(statusPolls.length).toBeGreaterThanOrEqual(10);
+    expect(screen.queryByText(/Timed out waiting for initialize-memory to complete\./)).toBeNull();
+    expect(screen.queryByText(/Activation failed during/)).toBeNull();
+  });
+
   it("stops activation on the first failure and shows the step-specific error", async () => {
     installFetchStub({
       configTestResponse: new Response("validation failed", { status: 500 }),

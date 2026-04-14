@@ -11,6 +11,7 @@ var DEFAULT_WORKSPACE_PREFIX = "paperclip";
 var HONCHO_V3_PATH = "/v3";
 var HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
 var DEFAULT_MAX_WORKSPACE_FILE_BYTES = 64 * 1024;
+var DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1e3;
 var EXPORT_NAMES = {
   settingsPage: "HonchoSettingsPage",
   issueTab: "HonchoIssueMemoryTab",
@@ -653,7 +654,7 @@ function HonchoSettingsPage({ context }) {
   }
   async function triggerJob(jobKey) {
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 5 * 6e4;
+    const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {

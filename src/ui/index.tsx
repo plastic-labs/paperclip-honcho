@@ -5,7 +5,7 @@ import {
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
 import { useEffect, useMemo, useState } from "react";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, JOB_KEYS, PLUGIN_ID } from "../constants.js";
+import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
 import type {
   IssueMemoryStatusData,
   MemoryStatusData,
@@ -665,7 +665,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
 
   async function triggerJob(jobKey: string) {
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 5 * 60_000;
+    const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
