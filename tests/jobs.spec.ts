@@ -184,6 +184,16 @@ describe("honcho memory jobs", () => {
         documents: 1,
         files: 0,
       },
+      issues: [
+        {
+          issueId: "iss_1",
+          issueIdentifier: "PAP-1",
+          issueTitle: "Fix auth regression",
+          commentCount: 2,
+          documentCount: 1,
+          estimatedMessages: 3,
+        },
+      ],
       warnings: [],
     });
 

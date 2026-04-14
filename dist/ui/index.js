@@ -178,6 +178,18 @@ var statStyle = {
   gap: "0.35rem",
   padding: "0.85rem"
 };
+var migrationListStyle = {
+  display: "grid",
+  gap: "0.6rem"
+};
+var migrationRowStyle = {
+  display: "grid",
+  gap: "0.2rem",
+  padding: "0.75rem 0.85rem",
+  borderRadius: "12px",
+  background: "rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15, 23, 42, 0.08)"
+};
 function hostFetchJson(path, init) {
   return fetch(path, {
     credentials: "include",
@@ -377,6 +389,22 @@ function StatusPill({ label, tone = "neutral" }) {
     background: palette.bg,
     color: palette.fg
   }, children: label });
+}
+function formatMigrationCount(value, singular, plural) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+function MigrationIssueList({ issues }) {
+  if (issues.length === 0) {
+    return /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "No issue-backed migration sources found yet." });
+  }
+  return /* @__PURE__ */ jsx("div", { style: migrationListStyle, children: issues.map((issue) => /* @__PURE__ */ jsxs("div", { style: migrationRowStyle, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx("div", { style: { fontWeight: 600 }, children: issue.issueIdentifier ?? issue.issueId }),
+      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: formatMigrationCount(issue.estimatedMessages, "message", "messages") })
+    ] }),
+    issue.issueTitle ? /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.92rem" }, children: issue.issueTitle }) : null,
+    /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.88rem" }, children: `${formatMigrationCount(issue.commentCount, "comment", "comments")} \u2022 ${formatMigrationCount(issue.documentCount, "document", "documents")}` })
+  ] }, issue.issueId)) });
 }
 function countTone(value, good = ["complete", "connected", "active", "mapped", "created"]) {
   if (!value) return "neutral";
@@ -771,7 +799,11 @@ function HonchoSettingsPage({ context }) {
       /* @__PURE__ */ jsx(Row, { label: "Issue documents", value: preview.data?.totals.documents ?? 0 }),
       /* @__PURE__ */ jsx(Row, { label: "Legacy files", value: preview.data?.totals && typeof preview.data.totals.files === "number" ? preview.data.totals.files : 0 }),
       /* @__PURE__ */ jsx(Row, { label: "Estimated messages", value: preview.data?.estimatedMessages ?? 0 }),
-      /* @__PURE__ */ jsx(Row, { label: "Warnings", value: preview.data?.warnings?.join("; ") || "None" })
+      /* @__PURE__ */ jsx(Row, { label: "Warnings", value: preview.data?.warnings?.join("; ") || "None" }),
+      /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.5rem" }, children: [
+        /* @__PURE__ */ jsx("div", { style: { fontSize: "0.92rem", fontWeight: 600 }, children: "Migration mapping" }),
+        /* @__PURE__ */ jsx(MigrationIssueList, { issues: preview.data?.issues ?? [] })
+      ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
       /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Activation" }),

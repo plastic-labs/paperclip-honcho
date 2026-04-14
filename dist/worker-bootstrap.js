@@ -8816,6 +8816,7 @@ function buildMigrationPreview(companyId, candidates) {
   const comments = candidates.filter((candidate) => candidate.sourceType === "issue_comments");
   const documents = candidates.filter((candidate) => candidate.sourceType === "issue_documents");
   const files = candidates.filter((candidate) => !["issue_comments", "issue_documents"].includes(candidate.sourceType));
+  const issueMap = /* @__PURE__ */ new Map();
   const warnings = [];
   if (comments.length === 0) {
     warnings.push("No issue comments were found for this company.");
@@ -8823,6 +8824,30 @@ function buildMigrationPreview(companyId, candidates) {
   if (documents.length === 0) {
     warnings.push("No issue document revisions were found for this company.");
   }
+  for (const candidate of candidates) {
+    if (!candidate.issueId) continue;
+    const existing = issueMap.get(candidate.issueId) ?? {
+      issueId: candidate.issueId,
+      issueIdentifier: candidate.issueIdentifier,
+      issueTitle: typeof candidate.metadata.issueTitle === "string" ? candidate.metadata.issueTitle : null,
+      commentCount: 0,
+      documentCount: 0,
+      estimatedMessages: 0
+    };
+    if (candidate.sourceType === "issue_comments") {
+      existing.commentCount += 1;
+    } else if (candidate.sourceType === "issue_documents") {
+      existing.documentCount += 1;
+    }
+    existing.estimatedMessages += 1;
+    issueMap.set(candidate.issueId, existing);
+  }
+  const issues = Array.from(issueMap.values()).sort((left, right) => {
+    if (right.estimatedMessages !== left.estimatedMessages) {
+      return right.estimatedMessages - left.estimatedMessages;
+    }
+    return (left.issueIdentifier ?? left.issueId).localeCompare(right.issueIdentifier ?? right.issueId);
+  });
   return {
     companyId,
     sourceTypes: Array.from(new Set(candidates.map((candidate) => candidate.sourceType))),
@@ -8831,6 +8856,7 @@ function buildMigrationPreview(companyId, candidates) {
       documents: documents.length,
       files: files.length
     },
+    issues,
     estimatedMessages: candidates.length,
     warnings,
     generatedAt: (/* @__PURE__ */ new Date()).toISOString()

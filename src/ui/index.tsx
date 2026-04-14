@@ -103,6 +103,20 @@ const statStyle: React.CSSProperties = {
   padding: "0.85rem",
 };
 
+const migrationListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.6rem",
+};
+
+const migrationRowStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.2rem",
+  padding: "0.75rem 0.85rem",
+  borderRadius: "12px",
+  background: "rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15, 23, 42, 0.08)",
+};
+
 type CompanySecretRecord = {
   id: string;
   name: string;
@@ -360,6 +374,32 @@ function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutra
     }}>
       {label}
     </span>
+  );
+}
+
+function formatMigrationCount(value: number, singular: string, plural: string): string {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function MigrationIssueList({ issues }: { issues: MigrationPreview["issues"] }) {
+  if (issues.length === 0) {
+    return <div style={{ color: "#475569", fontSize: "0.9rem" }}>No issue-backed migration sources found yet.</div>;
+  }
+  return (
+    <div style={migrationListStyle}>
+      {issues.map((issue) => (
+        <div key={issue.issueId} style={migrationRowStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 600 }}>{issue.issueIdentifier ?? issue.issueId}</div>
+            <div style={{ color: "#475569", fontSize: "0.9rem" }}>{formatMigrationCount(issue.estimatedMessages, "message", "messages")}</div>
+          </div>
+          {issue.issueTitle ? <div style={{ color: "#475569", fontSize: "0.92rem" }}>{issue.issueTitle}</div> : null}
+          <div style={{ color: "#475569", fontSize: "0.88rem" }}>
+            {`${formatMigrationCount(issue.commentCount, "comment", "comments")} • ${formatMigrationCount(issue.documentCount, "document", "documents")}`}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -790,6 +830,10 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         <Row label="Legacy files" value={(preview.data as Record<string, unknown> | null)?.totals && typeof (preview.data as Record<string, any>).totals.files === "number" ? (preview.data as Record<string, any>).totals.files : 0} />
         <Row label="Estimated messages" value={preview.data?.estimatedMessages ?? 0} />
         <Row label="Warnings" value={preview.data?.warnings?.join("; ") || "None"} />
+        <div style={{ display: "grid", gap: "0.5rem" }}>
+          <div style={{ fontSize: "0.92rem", fontWeight: 600 }}>Migration mapping</div>
+          <MigrationIssueList issues={preview.data?.issues ?? []} />
+        </div>
       </div>
 
       <div style={cardStyle}>

@@ -152,6 +152,24 @@ function installPluginHookStubs(options: PluginHookStubOptions = {}) {
           sourceTypes: ["issue_comments", "issue_documents"],
           totals: { comments: 10, documents: 4, files: 0 },
           estimatedMessages: 14,
+          issues: [
+            {
+              issueId: "iss_1",
+              issueIdentifier: "PAP-1",
+              issueTitle: "Auth regression",
+              commentCount: 8,
+              documentCount: 4,
+              estimatedMessages: 12,
+            },
+            {
+              issueId: "iss_2",
+              issueIdentifier: "PAP-2",
+              issueTitle: "Billing follow-up",
+              commentCount: 2,
+              documentCount: 0,
+              estimatedMessages: 2,
+            },
+          ],
           warnings: [],
         },
         refresh: vi.fn(),
@@ -243,6 +261,20 @@ describe("HonchoSettingsPage", () => {
     expect(screen.queryByRole("button", { name: "Rescan migration sources" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Import history" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Repair mappings" })).toBeNull();
+  });
+
+  it("renders per-issue migration counts in the preview", async () => {
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    expect(screen.getByText("Migration mapping")).toBeTruthy();
+    expect(screen.getByText("PAP-1")).toBeTruthy();
+    expect(screen.getByText("Auth regression")).toBeTruthy();
+    expect(screen.getByText("8 comments • 4 documents")).toBeTruthy();
+    expect(screen.getByText("12 messages")).toBeTruthy();
+    expect(screen.getByText("PAP-2")).toBeTruthy();
+    expect(screen.getByText("2 comments • 0 documents")).toBeTruthy();
   });
 
   it("runs activation steps in order and reports progress", async () => {
