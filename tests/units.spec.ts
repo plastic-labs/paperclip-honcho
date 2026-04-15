@@ -19,6 +19,24 @@ describe("honcho units", () => {
     expect(peerIdForUser("user_1")).toBe("user_user_1");
   });
 
+  it("keeps workspace ids readable while avoiding collisions for duplicate company names", () => {
+    const first = workspaceIdForCompany("co_1", "paperclip", "Acme");
+    const second = workspaceIdForCompany("co_2", "paperclip", "Acme");
+
+    expect(first).toMatch(/^Acme_/);
+    expect(second).toMatch(/^Acme_/);
+    expect(first).not.toBe(second);
+  });
+
+  it("keeps agent peer ids readable while avoiding collisions for duplicate agent names", () => {
+    const first = peerIdForAgent("agent_1", "Support Bot");
+    const second = peerIdForAgent("agent_2", "Support Bot");
+
+    expect(first).toMatch(/^agent_Support_Bot_/);
+    expect(second).toMatch(/^agent_Support_Bot_/);
+    expect(first).not.toBe(second);
+  });
+
   it("builds stable issue entity URLs", () => {
     expect(issueEntityUrl({ id: "iss_1", identifier: "PAP-1" } as Issue)).toBe("/issues/PAP-1");
     expect(issueEntityUrl({ id: "iss_2", identifier: null } as Issue)).toBe("/issues/iss_2");

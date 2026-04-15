@@ -4,11 +4,14 @@ import { PLUGIN_VERSION } from "../src/constants.js";
 import manifest from "../src/manifest.js";
 import plugin from "../src/worker.js";
 import { getResolvedConfig } from "../src/config.js";
+import { workspaceIdForCompany } from "../src/ids.js";
 import { BASE_CONFIG, createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
 
 describe("honcho config", () => {
   it("uses the shared plugin version constant in the manifest", () => {
@@ -160,7 +163,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "Paperclip",
+      workspaceId: companyWorkspaceId,
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
@@ -181,7 +184,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "Paperclip",
+      workspaceId: companyWorkspaceId,
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];

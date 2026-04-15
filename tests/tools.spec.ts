@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { peerIdForAgent, workspaceIdForCompany } from "../src/ids.js";
 import plugin from "../src/worker.js";
 import { createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
+const firstAgentPeerId = peerIdForAgent("agent_1", "Agent One");
 
 describe("honcho tools", () => {
   it("requires issue context for honcho_get_issue_context", async () => {
@@ -38,7 +42,7 @@ describe("honcho tools", () => {
 
     expect(result.content).toContain("Investigating auth regression");
     const contextRequest = requestsMatching(requests, "/context?")[0];
-    expect(contextRequest?.url).toContain("/v3/workspaces/Paperclip/sessions/PAP-1/context?");
+    expect(contextRequest?.url).toContain(`/v3/workspaces/${companyWorkspaceId}/sessions/PAP-1/context?`);
     expect(contextRequest?.url).toContain("summary=true");
     expect(contextRequest?.url).toContain("tokens=2000");
     expect(contextRequest?.url).toContain("peer_target=user_user_1");
@@ -141,7 +145,7 @@ describe("honcho tools", () => {
     await plugin.definition.setup(harness.ctx);
 
     await expect(
-      harness.executeTool("honcho_ask_peer", { targetPeerId: "agent_agent_1", query: "Status?", issueId: "iss_1" }, {
+      harness.executeTool("honcho_ask_peer", { targetPeerId: firstAgentPeerId, query: "Status?", issueId: "iss_1" }, {
         companyId: "co_1",
         projectId: "proj_1",
         agentId: "agent_1",
@@ -161,7 +165,7 @@ describe("honcho tools", () => {
     await plugin.definition.setup(harness.ctx);
 
     const result = await harness.executeTool("honcho_ask_peer", {
-      targetPeerId: "agent_agent_1",
+      targetPeerId: firstAgentPeerId,
       query: "Status?",
       issueId: "iss_1",
     }, {

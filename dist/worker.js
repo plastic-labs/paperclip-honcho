@@ -7437,21 +7437,24 @@ function toHonchoSafeSegment(value) {
 function joinHonchoId(parts) {
   return parts.map((part) => toHonchoSafeSegment(part)).filter((part) => part.length > 0).join("_");
 }
+function shortStableSuffix(value) {
+  return hashId(value).slice(0, 8);
+}
 function workspaceIdForCompany(companyId, workspacePrefix, companyName) {
   if (typeof companyName === "string" && companyName.trim()) {
-    return joinHonchoId([companyName]);
+    return joinHonchoId([companyName, shortStableSuffix(companyId)]);
   }
   return joinHonchoId([workspacePrefix, companyId]);
 }
 function peerIdForAgent(agentId, agentName) {
   if (typeof agentName === "string" && agentName.trim()) {
-    return joinHonchoId(["agent", agentName]);
+    return joinHonchoId(["agent", agentName, shortStableSuffix(agentId)]);
   }
   return joinHonchoId(["agent", agentId]);
 }
 function peerIdForUser(userId, userName) {
   if (typeof userName === "string" && userName.trim()) {
-    return joinHonchoId(["user", userName]);
+    return joinHonchoId(["user", userName, shortStableSuffix(userId)]);
   }
   return joinHonchoId(["user", userId]);
 }

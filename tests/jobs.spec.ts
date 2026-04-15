@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { peerIdForAgent, workspaceIdForCompany } from "../src/ids.js";
 import { setMigrationCandidatesLoaderForTests } from "../src/sync.js";
 import plugin from "../src/worker.js";
 import { createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
@@ -7,6 +8,9 @@ afterEach(() => {
   setMigrationCandidatesLoaderForTests(null);
   vi.restoreAllMocks();
 });
+
+const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
+const firstAgentPeerId = peerIdForAgent("agent_1", "Agent One");
 
 describe("honcho memory jobs", () => {
   it("initialize-memory creates company memory state, mappings, and an initialization report", async () => {
@@ -242,7 +246,7 @@ describe("honcho memory jobs", () => {
         }),
       }),
       expect.objectContaining({
-        peer_id: "agent_Agent_One",
+        peer_id: firstAgentPeerId,
         metadata: expect.objectContaining({
           contentType: "issue_document_section",
           documentRevisionId: "rev_2",
@@ -254,7 +258,7 @@ describe("honcho memory jobs", () => {
   it("migration-import skips candidates already present in the Honcho session and backfills the ledger", async () => {
     const { requests } = installFetchMock({
       existingSessionMessages: {
-        "Paperclip/PAP-1": [
+        [`${companyWorkspaceId}/PAP-1`]: [
           {
             id: "msg_existing_comment",
             metadata: {
@@ -311,13 +315,13 @@ describe("honcho memory jobs", () => {
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.body).toMatchObject({
-      id: "Paperclip",
+      id: companyWorkspaceId,
     });
     expect(workspaceRequest?.body).not.toHaveProperty("metadata");
 
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_Agent_One",
+      id: firstAgentPeerId,
       configuration: expect.any(Object),
     });
     expect(peerRequest?.body).not.toHaveProperty("config");
@@ -433,13 +437,13 @@ describe("honcho memory jobs", () => {
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.body).toMatchObject({
-      id: "Paperclip",
+      id: companyWorkspaceId,
     });
     expect(workspaceRequest?.body).not.toHaveProperty("metadata");
 
-    const agentPeerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_Agent_One");
+    const agentPeerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === firstAgentPeerId);
     expect(agentPeerRequest?.body).toMatchObject({
-      id: "agent_Agent_One",
+      id: firstAgentPeerId,
       metadata: expect.objectContaining({
         agent_name: "Agent One",
       }),
@@ -482,15 +486,15 @@ describe("honcho memory jobs", () => {
       expect.objectContaining({
         externalId: "paperclip:agent:agent_1",
         data: expect.objectContaining({
-          peerId: "agent_Agent_One",
+          peerId: firstAgentPeerId,
           peerType: "agent",
         }),
       }),
     ]));
 
-    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_Agent_One");
+    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === firstAgentPeerId);
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_Agent_One",
+      id: firstAgentPeerId,
       metadata: expect.objectContaining({
         agent_id: "agent_1",
       }),
@@ -545,7 +549,7 @@ describe("honcho memory jobs", () => {
       externalId: "paperclip:company:co_1",
     });
     expect(workspaceMappings[0]?.data).toMatchObject({
-      workspaceId: "Paperclip",
+      workspaceId: companyWorkspaceId,
     });
 
     const sessionMappings = await harness.ctx.entities.list({
@@ -556,7 +560,7 @@ describe("honcho memory jobs", () => {
     });
     expect(sessionMappings[0]?.data).toMatchObject({
       sessionId: "PAP-1",
-      workspaceId: "Paperclip",
+      workspaceId: companyWorkspaceId,
     });
   });
 

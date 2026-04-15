@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { peerIdForAgent } from "../src/ids.js";
 import plugin from "../src/worker.js";
 import { createHonchoHarness, installFetchMock } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const firstAgentPeerId = peerIdForAgent("agent_1", "Agent One");
 
 describe("@honcho-ai/paperclip-honcho smoke", () => {
   it("covers the expected end-to-end plugin pipeline", async () => {
@@ -41,7 +44,7 @@ describe("@honcho-ai/paperclip-honcho smoke", () => {
       runId: "run_1",
     });
     const askResult = await harness.executeTool("honcho_ask_peer", {
-      targetPeerId: "agent_agent_1",
+      targetPeerId: firstAgentPeerId,
       query: "What happened?",
       issueId: "iss_1",
     }, {

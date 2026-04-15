@@ -16,27 +16,31 @@ function joinHonchoId(parts: string[]): string {
     .join("_");
 }
 
+function shortStableSuffix(value: string): string {
+  return hashId(value).slice(0, 8);
+}
+
 export function workspaceIdForCompany(
   companyId: string,
   workspacePrefix: string,
   companyName?: string | null,
 ): string {
   if (typeof companyName === "string" && companyName.trim()) {
-    return joinHonchoId([companyName]);
+    return joinHonchoId([companyName, shortStableSuffix(companyId)]);
   }
   return joinHonchoId([workspacePrefix, companyId]);
 }
 
 export function peerIdForAgent(agentId: string, agentName?: string | null): string {
   if (typeof agentName === "string" && agentName.trim()) {
-    return joinHonchoId(["agent", agentName]);
+    return joinHonchoId(["agent", agentName, shortStableSuffix(agentId)]);
   }
   return joinHonchoId(["agent", agentId]);
 }
 
 export function peerIdForUser(userId: string, userName?: string | null): string {
   if (typeof userName === "string" && userName.trim()) {
-    return joinHonchoId(["user", userName]);
+    return joinHonchoId(["user", userName, shortStableSuffix(userId)]);
   }
   return joinHonchoId(["user", userId]);
 }
