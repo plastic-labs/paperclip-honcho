@@ -29,6 +29,7 @@ type FetchStubOptions = {
 
 type PluginHookStubOptions = {
   testConnectionAction?: ReturnType<typeof vi.fn>;
+  initializeMemoryAction?: ReturnType<typeof vi.fn>;
   memoryStatusOverrides?: Record<string, unknown>;
 };
 
@@ -193,6 +194,7 @@ function installPluginHookStubs(options: PluginHookStubOptions = {}) {
 
   mockUsePluginAction.mockImplementation((key: string) => {
     if (key === ACTION_KEYS.testConnection) return options.testConnectionAction ?? vi.fn(async () => ({ ok: true }));
+    if (key === ACTION_KEYS.initializeMemoryForCompany) return options.initializeMemoryAction ?? vi.fn(async () => ({ ok: true }));
     if (key === ACTION_KEYS.probePromptContext) return vi.fn(async () => ({ status: "inactive", preview: null }));
     return vi.fn(async () => ({ ok: true }));
   });
@@ -277,8 +279,32 @@ describe("HonchoSettingsPage", () => {
     expect(screen.getByText("2 comments • 0 documents")).toBeTruthy();
   });
 
+  it("autosaves settings changes after a debounce", async () => {
+    render(<HonchoSettingsPage context={testContext} />);
+
+    await waitForActionButtonsReady();
+
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByLabelText("Enable peer chat tool"));
+
+    const configPostsBeforeDebounce = vi.mocked(fetch).mock.calls.filter(([input, init]) => {
+      return String(input).endsWith("/config") && (init?.method ?? "GET") === "POST";
+    });
+    expect(configPostsBeforeDebounce).toHaveLength(0);
+
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+
+    const configPosts = vi.mocked(fetch).mock.calls.filter(([input, init]) => {
+      return String(input).endsWith("/config") && (init?.method ?? "GET") === "POST";
+    });
+    expect(configPosts).toHaveLength(1);
+  });
+
   it("runs activation steps in order and reports progress", async () => {
     const triggeredJobs: string[] = [];
+    const initializeAction = vi.fn(async () => ({ ok: true }));
     let resolveValidation: () => void = () => {
       throw new Error("Validation resolver was not initialized");
     };
@@ -289,6 +315,10 @@ describe("HonchoSettingsPage", () => {
       onJobTrigger: (url) => {
         triggeredJobs.push(url);
       },
+    });
+    installPluginHookStubs({
+      testConnectionAction: vi.fn(async () => ({ ok: true })),
+      initializeMemoryAction: initializeAction,
     });
 
     render(<HonchoSettingsPage context={testContext} />);
@@ -311,13 +341,14 @@ describe("HonchoSettingsPage", () => {
 
     const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
     const configTestIndex = requestUrls.findIndex((url) => url.endsWith("/config/test"));
-    const initializeIndex = requestUrls.findIndex((url) => url.includes("/jobs/job_init/trigger"));
+    const initializeIndex = initializeAction.mock.invocationCallOrder[0] ?? -1;
 
     expect(configTestIndex).toBeGreaterThan(-1);
-    expect(initializeIndex).toBeGreaterThan(configTestIndex);
+    expect(initializeIndex).toBeGreaterThan(0);
     expect(triggeredJobs).toEqual([
       "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
     ]);
+    expect(initializeAction).toHaveBeenCalledWith({ companyId: "co_1" });
   });
 
   it("waits for each triggered job to complete before starting the next one", async () => {

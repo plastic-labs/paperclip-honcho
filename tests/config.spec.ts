@@ -160,7 +160,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "paperclip_co_1",
+      workspaceId: "Paperclip",
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
@@ -181,7 +181,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "paperclip_co_1",
+      workspaceId: "Paperclip",
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];

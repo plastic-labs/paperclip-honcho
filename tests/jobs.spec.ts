@@ -242,13 +242,64 @@ describe("honcho memory jobs", () => {
         }),
       }),
       expect.objectContaining({
-        peer_id: "agent_agent_1",
+        peer_id: "agent_Agent_One",
         metadata: expect.objectContaining({
           contentType: "issue_document_section",
           documentRevisionId: "rev_2",
         }),
       }),
     ]));
+  });
+
+  it("migration-import skips candidates already present in the Honcho session and backfills the ledger", async () => {
+    const { requests } = installFetchMock({
+      existingSessionMessages: {
+        "Paperclip/PAP-1": [
+          {
+            id: "msg_existing_comment",
+            metadata: {
+              commentId: "c_1",
+              contentType: "issue_comment",
+            },
+          },
+          {
+            id: "msg_existing_document",
+            metadata: {
+              documentRevisionId: "rev_2",
+              sectionKey: "design:r2:s0",
+              contentType: "issue_document_section",
+            },
+          },
+        ],
+      },
+    });
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("migration-scan");
+    await harness.runJob("migration-import");
+
+    const importLedger = await harness.ctx.entities.list({
+      entityType: "honcho-import-ledger",
+      scopeKind: "company",
+      scopeId: "co_1",
+    });
+    expect(importLedger.map((record) => record.externalId)).toEqual(expect.arrayContaining([
+      "paperclip:comment:c_1",
+      "paperclip:comment:c_2",
+      "paperclip:document:rev_2:design:r2:s0",
+    ]));
+
+    const listRequests = requestsMatching(requests, "/messages/list");
+    expect(listRequests).toHaveLength(1);
+
+    const appendRequests = requestsMatching(requests, "/messages").filter((request) => !request.url.endsWith("/messages/list"));
+    const appendedMessages = appendRequests.flatMap((request) => (request.body?.messages ?? []) as Array<Record<string, unknown>>);
+    expect(appendedMessages).toHaveLength(1);
+    expect(appendedMessages[0]?.metadata).toMatchObject({
+      commentId: "c_2",
+      contentType: "issue_comment",
+    });
   });
 
   it("uses Honcho-safe ids and payload field names during initialization", async () => {
@@ -260,12 +311,13 @@ describe("honcho memory jobs", () => {
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.body).toMatchObject({
-      id: "paperclip_co_1",
+      id: "Paperclip",
     });
+    expect(workspaceRequest?.body).not.toHaveProperty("metadata");
 
     const peerRequest = requestsMatching(requests, "/peers")[0];
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent_1",
+      id: "agent_Agent_One",
       configuration: expect.any(Object),
     });
     expect(peerRequest?.body).not.toHaveProperty("config");
@@ -275,7 +327,7 @@ describe("honcho memory jobs", () => {
       id: "PAP-1",
     });
 
-    const messageRequest = requestsMatching(requests, "/messages")[0];
+    const messageRequest = requestsMatching(requests, "/messages").find((request) => !request.url.includes("/messages/list"));
     const firstMessage = ((messageRequest?.body?.messages ?? []) as Array<Record<string, unknown>>)[0];
     expect(firstMessage).toMatchObject({
       peer_id: expect.stringMatching(/^(agent|user|owner|system)_/),
@@ -340,6 +392,60 @@ describe("honcho memory jobs", () => {
     expect(importLedger).toHaveLength(3);
   });
 
+  it("migration skips issue memory that was already synced through issue events", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, {
+      entityId: "iss_1",
+      entityType: "issue",
+      companyId: "co_1",
+    });
+
+    expect(requestsMatching(requests, "/messages")).toHaveLength(1);
+
+    await harness.runJob("migration-scan");
+
+    const preview = await harness.getData<Record<string, unknown>>("migration-preview", {
+      companyId: "co_1",
+    });
+    expect(preview).toMatchObject({
+      totals: {
+        comments: 0,
+        documents: 0,
+        files: 0,
+      },
+      estimatedMessages: 0,
+    });
+
+    await harness.runJob("migration-import");
+
+    expect(requestsMatching(requests, "/messages")).toHaveLength(1);
+  });
+
+  it("initialization uses readable workspace and agent peer ids without workspace metadata", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.body).toMatchObject({
+      id: "Paperclip",
+    });
+    expect(workspaceRequest?.body).not.toHaveProperty("metadata");
+
+    const agentPeerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_Agent_One");
+    expect(agentPeerRequest?.body).toMatchObject({
+      id: "agent_Agent_One",
+      metadata: expect.objectContaining({
+        agent_name: "Agent One",
+      }),
+    });
+  });
+
   it("migration-import maps agent profile files to agent peers instead of owner peers", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness();
@@ -376,15 +482,15 @@ describe("honcho memory jobs", () => {
       expect.objectContaining({
         externalId: "paperclip:agent:agent_1",
         data: expect.objectContaining({
-          peerId: "agent_agent_1",
+          peerId: "agent_Agent_One",
           peerType: "agent",
         }),
       }),
     ]));
 
-    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_agent_1");
+    const peerRequest = requestsMatching(requests, "/peers").find((request) => request.body?.id === "agent_Agent_One");
     expect(peerRequest?.body).toMatchObject({
-      id: "agent_agent_1",
+      id: "agent_Agent_One",
       metadata: expect.objectContaining({
         agent_id: "agent_1",
       }),
@@ -439,7 +545,7 @@ describe("honcho memory jobs", () => {
       externalId: "paperclip:company:co_1",
     });
     expect(workspaceMappings[0]?.data).toMatchObject({
-      workspaceId: "paperclip_co_1",
+      workspaceId: "Paperclip",
     });
 
     const sessionMappings = await harness.ctx.entities.list({
@@ -450,7 +556,7 @@ describe("honcho memory jobs", () => {
     });
     expect(sessionMappings[0]?.data).toMatchObject({
       sessionId: "PAP-1",
-      workspaceId: "paperclip_co_1",
+      workspaceId: "Paperclip",
     });
   });
 

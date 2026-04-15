@@ -23,7 +23,8 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  resyncIssue: "resync-issue"
+  resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company"
 };
 var JOB_KEYS = {
   initializeMemory: "initialize-memory",

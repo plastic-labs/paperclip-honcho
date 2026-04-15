@@ -53,7 +53,9 @@ export async function upsertWorkspaceMapping(
   const mappedWorkspacePrefix = typeof existing?.data.workspacePrefix === "string" && existing.data.workspacePrefix.trim()
     ? existing.data.workspacePrefix
     : null;
-  const canonicalWorkspaceId = mappedWorkspaceId ?? workspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  const canonicalWorkspaceId = mappedWorkspaceId
+    ?? workspaceId
+    ?? workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const canonicalWorkspacePrefix = mappedWorkspacePrefix ?? workspacePrefix;
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
@@ -149,7 +151,7 @@ export async function upsertAgentPeerMapping(
   agent: Agent,
   status: "mapped" | "missing" = "mapped",
 ) {
-  const peerId = peerIdForAgent(agent.id);
+  const peerId = peerIdForAgent(agent.id, agent.name);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -341,7 +343,9 @@ export async function resolveCanonicalWorkspaceId(
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
     ? mapping.data.workspaceId
     : null;
-  return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  if (mappedWorkspaceId) return mappedWorkspaceId;
+  const company = await ctx.companies.get(companyId);
+  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
 }
 
 export async function resolveCanonicalIssueSessionId(

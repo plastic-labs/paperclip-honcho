@@ -64,12 +64,14 @@ export type CapturedRequest = {
 type FetchMockOptions = {
   failOn?: Array<string | RegExp>;
   failOnceOn?: Array<string | RegExp>;
+  returnNullOnceOn?: Array<string | RegExp>;
   rateLimitOnceOn?: Array<string | RegExp>;
   delayOn?: Array<{ pattern: string | RegExp; ms: number }>;
   searchResults?: Array<Record<string, unknown>>;
   summaries?: string[];
   chatText?: string;
   workspaceResponse?: Record<string, unknown>;
+  existingSessionMessages?: Record<string, Array<Record<string, unknown>>>;
 };
 
 function matchesPattern(url: string, pattern: string | RegExp): boolean {
@@ -114,8 +116,14 @@ function parseHeaders(headers: HeadersInit | undefined): Record<string, string> 
 
 export function installFetchMock(options: FetchMockOptions = {}) {
   const requests: CapturedRequest[] = [];
+  const sessionMessages = new Map<string, Array<Record<string, unknown>>>(
+    Object.entries(options.existingSessionMessages ?? {}),
+  );
   const remainingFailOnce = new Map<string | RegExp, number>(
     (options.failOnceOn ?? []).map((pattern) => [pattern, 1]),
+  );
+  const remainingReturnNullOnce = new Map<string | RegExp, number>(
+    (options.returnNullOnceOn ?? []).map((pattern) => [pattern, 1]),
   );
   const remainingRateLimitOnce = new Map<string | RegExp, number>(
     (options.rateLimitOnceOn ?? []).map((pattern) => [pattern, 1]),
@@ -136,6 +144,12 @@ export function installFetchMock(options: FetchMockOptions = {}) {
       if (remaining > 0 && matchesPattern(url, pattern)) {
         remainingFailOnce.set(pattern, remaining - 1);
         return new Response(JSON.stringify({ error: "forced failure" }), { status: 500 });
+      }
+    }
+    for (const [pattern, remaining] of remainingReturnNullOnce.entries()) {
+      if (remaining > 0 && matchesPattern(url, pattern)) {
+        remainingReturnNullOnce.set(pattern, remaining - 1);
+        return null as unknown as Response;
       }
     }
     for (const [pattern, remaining] of remainingRateLimitOnce.entries()) {
@@ -180,6 +194,30 @@ export function installFetchMock(options: FetchMockOptions = {}) {
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }
     if (url.includes("/messages")) {
+      const urlWithoutQuery = url.split("?", 1)[0] ?? url;
+      const sessionMatch = urlWithoutQuery.match(/\/workspaces\/([^/]+)\/sessions\/([^/]+)\/messages(?:\/list)?$/);
+      const sessionKey = sessionMatch ? `${decodeURIComponent(sessionMatch[1] ?? "")}/${decodeURIComponent(sessionMatch[2] ?? "")}` : null;
+      if (urlWithoutQuery.endsWith("/messages/list")) {
+        const items = sessionKey ? (sessionMessages.get(sessionKey) ?? []) : [];
+        return new Response(JSON.stringify({
+          items,
+          total: items.length,
+          page: 1,
+          size: Math.max(1, items.length),
+          pages: 1,
+        }), { status: 200 });
+      }
+      if (sessionKey) {
+        const existing = sessionMessages.get(sessionKey) ?? [];
+        const incoming = ((parseBody(init?.body)?.messages as Array<Record<string, unknown>> | undefined) ?? []).map((message, index) => ({
+          id: `${sessionKey}:msg_${existing.length + index + 1}`,
+          content: message.content ?? null,
+          metadata: message.metadata ?? null,
+          peer_id: message.peer_id ?? null,
+          created_at: message.created_at ?? null,
+        }));
+        sessionMessages.set(sessionKey, [...existing, ...incoming]);
+      }
       return new Response(JSON.stringify({ ok: true }), { status: 200 });
     }
     if (url.includes("/context")) {

@@ -19,6 +19,7 @@ export const DEFAULT_FILE_SCAN_LIMIT = 100;
 export const DEFAULT_FILE_SCAN_MAX_DEPTH = 4;
 export const DEFAULT_SUMMARIZED_SEARCH_LIMIT = 3;
 export const DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
+export const DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 750;
 
 export const LEGACY_ROOT_FILES = [
   "USER.md",
@@ -78,6 +79,7 @@ export const ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
   resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company",
 } as const;
 
 export const JOB_KEYS = {
@@ -143,3 +145,4 @@ export const DEFAULT_CONFIG = {
 export const ISSUE_STATUS_STATE_KEY = "issue-sync-status";
 export const COMPANY_STATUS_STATE_KEY = "company-memory-status";
 export const COMPANY_CHECKPOINT_STATE_KEY = "company-memory-checkpoints";
+export const INSTANCE_JOB_TARGETS_STATE_KEY = "instance-job-targets";

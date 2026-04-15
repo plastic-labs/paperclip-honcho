@@ -27,7 +27,8 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-async function parseJson(res: Response | { status: number; body: string }) {
+async function parseJson(res: Response | { status: number; body: string } | null) {
+  if (!res) return {};
   if ("json" in res) {
     const text = await res.text();
     return text ? JSON.parse(text) as JsonRecord : {};
@@ -130,6 +131,13 @@ async function requestJson(
         ...(init.headers ?? {}),
       },
     });
+    if (!res) {
+      if (attempt < RATE_LIMIT_MAX_RETRIES) {
+        await sleep(RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`${pathname} returned no response`);
+    }
     const status = res.status;
     if (status >= 200 && status < 300) {
       return await parseJson(res);
@@ -200,6 +208,11 @@ export class HonchoClient {
     return sessionId;
   }
 
+  private async agentPeerId(companyId: string, agentId: string): Promise<string> {
+    const agent = await this.ctx.agents.get(agentId, companyId);
+    return peerIdForAgent(agentId, agent?.name ?? null);
+  }
+
   async ensureWorkspace(companyId: string): Promise<string> {
     const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
@@ -209,10 +222,6 @@ export class HonchoClient {
       method: "POST",
       body: JSON.stringify({
         id: workspaceId,
-        metadata: {
-          source_system: "paperclip",
-          company_id: companyId,
-        },
       }),
     });
     this.ensuredWorkspaces.add(workspaceId);
@@ -228,12 +237,6 @@ export class HonchoClient {
       method: "POST",
       body: JSON.stringify({
         id: workspaceId,
-        metadata: {
-          source_system: "paperclip",
-          company_id: companyId,
-          company_name: company?.name ?? null,
-          company_issue_prefix: company?.issuePrefix ?? null,
-        },
       }),
     });
     this.ensuredWorkspaces.add(workspaceId);
@@ -277,7 +280,7 @@ export class HonchoClient {
   async ensureAgentPeer(companyId: string, agent: Agent): Promise<string> {
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id),
+      peerIdForAgent(agent.id, agent.name),
       {
         company_id: companyId,
         agent_id: agent.id,
@@ -392,6 +395,44 @@ export class HonchoClient {
     );
   }
 
+  async listSessionMessageMetadata(
+    companyId: string,
+    sessionId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const workspaceId = await this.workspaceId(companyId);
+    const items: Array<Record<string, unknown>> = [];
+    let page = 1;
+    let pages = 1;
+
+    while (page <= pages) {
+      const payload = await requestJson(
+        this.ctx,
+        this.config,
+        this.apiKey,
+        `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/list?page=${page}&size=200`,
+        {
+          method: "POST",
+          body: JSON.stringify({}),
+        },
+      );
+      const nextItems = Array.isArray(payload.items) ? payload.items : [];
+      for (const item of nextItems) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const metadata = (item as Record<string, unknown>).metadata;
+          if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+            items.push(metadata as Record<string, unknown>);
+          }
+        }
+      }
+      pages = typeof payload.pages === "number" && Number.isFinite(payload.pages) && payload.pages > 0
+        ? payload.pages
+        : page;
+      page += 1;
+    }
+
+    return items;
+  }
+
   async getIssueContext(companyId: string, issueId: string, userPeerId?: string | null): Promise<HonchoIssueContext> {
     const sessionId = await this.ensureSession(companyId, issueId);
     return await this.getSessionContext(companyId, sessionId, userPeerId, issueId);
@@ -454,11 +495,12 @@ export class HonchoClient {
     params: { issueId?: string | null; summaryOnly?: boolean },
   ): Promise<string | null> {
     const workspaceId = await this.workspaceId(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -472,10 +514,11 @@ export class HonchoClient {
 
   async searchMemory(companyId: string, agentId: string, params: SearchMemoryParams): Promise<HonchoSearchResult[]> {
     const agent = await this.ctx.agents.get(agentId, companyId);
+    const agentPeerId = peerIdForAgent(agentId, agent?.name ?? null);
     if (agent) {
       await this.ensureAgentPeer(companyId, agent);
     } else {
-      await this.ensurePeer(companyId, peerIdForAgent(agentId), {
+      await this.ensurePeer(companyId, agentPeerId, {
         company_id: companyId,
         agent_id: agentId,
       }, {
@@ -493,7 +536,7 @@ export class HonchoClient {
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -518,11 +561,12 @@ export class HonchoClient {
 
   async askPeer(companyId: string, agentId: string, params: AskPeerParams): Promise<HonchoChatResult> {
     const workspaceId = await this.ensureWorkspace(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/chat`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/chat`,
       {
         method: "POST",
         body: JSON.stringify({

@@ -18,6 +18,7 @@ var DEFAULT_FILE_SCAN_LIMIT = 100;
 var DEFAULT_FILE_SCAN_MAX_DEPTH = 4;
 var DEFAULT_SUMMARIZED_SEARCH_LIMIT = 3;
 var DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1e3;
+var DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 750;
 var LEGACY_ROOT_FILES = [
   "USER.md",
   "MEMORY.md",
@@ -68,7 +69,8 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  resyncIssue: "resync-issue"
+  resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company"
 };
 var JOB_KEYS = {
   initializeMemory: "initialize-memory",
@@ -128,6 +130,7 @@ var DEFAULT_CONFIG = {
 var ISSUE_STATUS_STATE_KEY = "issue-sync-status";
 var COMPANY_STATUS_STATE_KEY = "company-memory-status";
 var COMPANY_CHECKPOINT_STATE_KEY = "company-memory-checkpoints";
+var INSTANCE_JOB_TARGETS_STATE_KEY = "instance-job-targets";
 export {
   ACTION_KEYS,
   COMPANY_CHECKPOINT_STATE_KEY,
@@ -147,6 +150,7 @@ export {
   DEFAULT_MIN_IMPORT_TEXT_LENGTH,
   DEFAULT_NOISE_PATTERNS,
   DEFAULT_SEARCH_LIMIT,
+  DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS,
   DEFAULT_SUMMARIZED_SEARCH_LIMIT,
   DEFAULT_WORKSPACE_PREFIX,
   ENTITY_TYPES,
@@ -154,6 +158,7 @@ export {
   FILE_IMPORT_PRIORITY,
   HONCHO_CONNECTION_PROBE_PATH,
   HONCHO_V3_PATH,
+  INSTANCE_JOB_TARGETS_STATE_KEY,
   ISSUE_STATUS_STATE_KEY,
   JOB_KEYS,
   LEGACY_DIRECTORY_ROOTS,

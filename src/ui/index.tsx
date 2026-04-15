@@ -4,8 +4,8 @@ import {
   type PluginDetailTabProps,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
-import { useEffect, useMemo, useState } from "react";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
 import type {
   IssueMemoryStatusData,
   MemoryStatusData,
@@ -649,11 +649,13 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
+  const initializeMemoryForCompany = usePluginAction(ACTION_KEYS.initializeMemoryForCompany);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const [activationStepIndex, setActivationStepIndex] = useState<number | null>(null);
   const [activationStepLabel, setActivationStepLabel] = useState<string | null>(null);
+  const lastPersistedConfigRef = useRef<string | null>(null);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
@@ -668,6 +670,39 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     preview.refresh();
     jobStatus.refresh();
   }
+
+  function markConfigPersisted(config: SettingsConfig) {
+    lastPersistedConfigRef.current = JSON.stringify(config);
+  }
+
+  useEffect(() => {
+    if (settings.loading) return;
+
+    const serializedConfig = JSON.stringify(settings.configJson);
+    if (lastPersistedConfigRef.current == null) {
+      lastPersistedConfigRef.current = serializedConfig;
+      return;
+    }
+    if (serializedConfig === lastPersistedConfigRef.current || settings.saving || isActivating) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          validateSettingsBeforePersist(settings.configJson);
+          await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
+        } catch (nextError) {
+          setError(formatUnknownError(nextError));
+        }
+      })();
+    }, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isActivating, settings.configJson, settings.loading, settings.saving]);
 
   async function getCheckpointStatus() {
     if (!companyId) return null;
@@ -686,6 +721,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     setNotice(null);
     try {
       await settings.save(settings.configJson);
+      markConfigPersisted(settings.configJson);
       memoryStatus.refresh();
       setNotice("Settings saved.");
     } catch (nextError) {
@@ -704,6 +740,12 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   }
 
   async function triggerJob(jobKey: string) {
+    if (jobKey === JOB_KEYS.initializeMemory) {
+      if (!companyId) {
+        throw new Error("companyId is required");
+      }
+      await initializeMemoryForCompany({ companyId });
+    }
     await jobs.triggerByKey(jobKey);
     const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
@@ -728,6 +770,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         run: async () => {
           await validateCurrentSettings();
           await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
         },
       },
       {

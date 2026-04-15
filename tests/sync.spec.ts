@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_MAX_INGEST_MESSAGE_CHARS } from "../src/constants.js";
+import { ACTION_KEYS, DEFAULT_MAX_INGEST_MESSAGE_CHARS, JOB_KEYS } from "../src/constants.js";
 import { getIssueSyncQueueSizeForTests } from "../src/sync.js";
 import plugin from "../src/worker.js";
 import { buildDefaultFixtures, createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
@@ -330,6 +330,91 @@ describe("honcho sync", () => {
     });
 
     expect(requests.filter((request) => request.url.endsWith("/v3/workspaces"))).toHaveLength(1);
+  });
+
+  it("retries transient null Honcho responses instead of failing the sync", async () => {
+    const { requests } = installFetchMock({
+      returnNullOnceOn: ["/v3/workspaces"],
+    });
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+
+    await expect(harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" })).resolves.toMatchObject({
+      issueId: "iss_1",
+      syncedComments: 2,
+    });
+
+    expect(requests.filter((request) => request.url.endsWith("/v3/workspaces")).length).toBeGreaterThanOrEqual(2);
+    expect(requestsMatching(requests, "/messages")).toHaveLength(1);
+  });
+
+  it("initializes memory for the company selected by the settings page", async () => {
+    const { requests } = installFetchMock();
+    const fixtures = buildDefaultFixtures();
+    const harness = createHonchoHarness({
+      seed: {
+        companies: [
+          fixtures.companies[0],
+          {
+            ...fixtures.companies[0],
+            id: "co_2",
+            name: "Second Company",
+            issuePrefix: "SEC",
+          },
+        ],
+        issues: [
+          {
+            ...fixtures.issues[0],
+            id: "iss_2",
+            companyId: "co_2",
+            identifier: "SEC-1",
+            title: "Second company issue",
+          },
+          fixtures.issues[0],
+        ],
+        issueComments: fixtures.issueComments.map((comment) => ({
+          ...comment,
+          issueId: "iss_2",
+          companyId: "co_2",
+        })),
+        issueDocuments: fixtures.issueDocuments.map((document) => ({
+          ...document,
+          issueId: "iss_2",
+          companyId: "co_2",
+        })),
+        documentRevisions: fixtures.documentRevisions.map((revision) => ({
+          ...revision,
+          issueId: "iss_2",
+          companyId: "co_2",
+        })),
+        agents: fixtures.agents.map((agent) => ({
+          ...agent,
+          companyId: "co_2",
+        })),
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_2" });
+    await harness.runJob(JOB_KEYS.initializeMemory);
+
+    const secondCompanyStatus = harness.getState({
+      scopeKind: "company",
+      scopeId: "co_2",
+      namespace: "honcho",
+      stateKey: "company-memory-status",
+    }) as Record<string, unknown>;
+    const firstCompanyStatus = harness.getState({
+      scopeKind: "company",
+      scopeId: "co_1",
+      namespace: "honcho",
+      stateKey: "company-memory-status",
+    }) as Record<string, unknown> | undefined;
+
+    expect(secondCompanyStatus.initializationStatus).toBe("complete");
+    expect(firstCompanyStatus?.initializationStatus ?? "not_started").toBe("not_started");
+    expect(requests.some((request) => JSON.stringify(request.body).includes("SEC-1"))).toBe(true);
   });
 
 });

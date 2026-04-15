@@ -6998,7 +6998,8 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  resyncIssue: "resync-issue"
+  resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company"
 };
 var JOB_KEYS = {
   initializeMemory: "initialize-memory",
@@ -7058,6 +7059,7 @@ var DEFAULT_CONFIG = {
 var ISSUE_STATUS_STATE_KEY = "issue-sync-status";
 var COMPANY_STATUS_STATE_KEY = "company-memory-status";
 var COMPANY_CHECKPOINT_STATE_KEY = "company-memory-checkpoints";
+var INSTANCE_JOB_TARGETS_STATE_KEY = "instance-job-targets";
 
 // src/manifest.ts
 var PLUGIN_ID = "honcho-ai.paperclip-honcho";
@@ -7435,13 +7437,22 @@ function toHonchoSafeSegment(value) {
 function joinHonchoId(parts) {
   return parts.map((part) => toHonchoSafeSegment(part)).filter((part) => part.length > 0).join("_");
 }
-function workspaceIdForCompany(companyId, workspacePrefix) {
+function workspaceIdForCompany(companyId, workspacePrefix, companyName) {
+  if (typeof companyName === "string" && companyName.trim()) {
+    return joinHonchoId([companyName]);
+  }
   return joinHonchoId([workspacePrefix, companyId]);
 }
-function peerIdForAgent(agentId) {
+function peerIdForAgent(agentId, agentName) {
+  if (typeof agentName === "string" && agentName.trim()) {
+    return joinHonchoId(["agent", agentName]);
+  }
   return joinHonchoId(["agent", agentId]);
 }
-function peerIdForUser(userId) {
+function peerIdForUser(userId, userName) {
+  if (typeof userName === "string" && userName.trim()) {
+    return joinHonchoId(["user", userName]);
+  }
   return joinHonchoId(["user", userId]);
 }
 function sessionIdForIssue(issueId, issueIdentifier) {
@@ -7491,7 +7502,7 @@ async function upsertWorkspaceMapping(ctx, company, companyId, workspacePrefix, 
   const existing = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof existing?.data.workspaceId === "string" && existing.data.workspaceId.trim() ? existing.data.workspaceId : null;
   const mappedWorkspacePrefix = typeof existing?.data.workspacePrefix === "string" && existing.data.workspacePrefix.trim() ? existing.data.workspacePrefix : null;
-  const canonicalWorkspaceId = mappedWorkspaceId ?? workspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  const canonicalWorkspaceId = mappedWorkspaceId ?? workspaceId ?? workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const canonicalWorkspacePrefix = mappedWorkspacePrefix ?? workspacePrefix;
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
@@ -7555,7 +7566,7 @@ async function upsertBootstrapSessionMapping(ctx, companyId, input) {
   });
 }
 async function upsertAgentPeerMapping(ctx, companyId, agent, status = "mapped") {
-  const peerId = peerIdForAgent(agent.id);
+  const peerId = peerIdForAgent(agent.id, agent.name);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -7684,7 +7695,9 @@ async function getSessionMappingRecord(ctx, issueId) {
 async function resolveCanonicalWorkspaceId(ctx, companyId, workspacePrefix) {
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim() ? mapping.data.workspaceId : null;
-  return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  if (mappedWorkspaceId) return mappedWorkspaceId;
+  const company = await ctx.companies.get(companyId);
+  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
 }
 async function resolveCanonicalIssueSessionId(ctx, issueId, issueIdentifier) {
   const mapping = await getSessionMappingRecord(ctx, issueId);
@@ -7771,6 +7784,7 @@ function sleep(ms) {
   });
 }
 async function parseJson(res) {
+  if (!res) return {};
   if ("json" in res) {
     const text = await res.text();
     return text ? JSON.parse(text) : {};
@@ -7847,6 +7861,13 @@ async function requestJson(ctx, config, apiKey, pathname, init) {
         ...init.headers ?? {}
       }
     });
+    if (!res) {
+      if (attempt < RATE_LIMIT_MAX_RETRIES) {
+        await sleep(RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`${pathname} returned no response`);
+    }
     const status = res.status;
     if (status >= 200 && status < 300) {
       return await parseJson(res);
@@ -7907,6 +7928,10 @@ var HonchoClient = class {
     this.resolvedSessionIds.set(cacheKey, sessionId);
     return sessionId;
   }
+  async agentPeerId(companyId, agentId) {
+    const agent = await this.ctx.agents.get(agentId, companyId);
+    return peerIdForAgent(agentId, agent?.name ?? null);
+  }
   async ensureWorkspace(companyId) {
     const workspaceId = await this.workspaceId(companyId);
     if (this.ensuredWorkspaces.has(workspaceId)) {
@@ -7915,11 +7940,7 @@ var HonchoClient = class {
     await requestJson(this.ctx, this.config, this.apiKey, `${HONCHO_V3_PATH}/workspaces`, {
       method: "POST",
       body: JSON.stringify({
-        id: workspaceId,
-        metadata: {
-          source_system: "paperclip",
-          company_id: companyId
-        }
+        id: workspaceId
       })
     });
     this.ensuredWorkspaces.add(workspaceId);
@@ -7933,13 +7954,7 @@ var HonchoClient = class {
     await requestJson(this.ctx, this.config, this.apiKey, `${HONCHO_V3_PATH}/workspaces`, {
       method: "POST",
       body: JSON.stringify({
-        id: workspaceId,
-        metadata: {
-          source_system: "paperclip",
-          company_id: companyId,
-          company_name: company?.name ?? null,
-          company_issue_prefix: company?.issuePrefix ?? null
-        }
+        id: workspaceId
       })
     });
     this.ensuredWorkspaces.add(workspaceId);
@@ -7975,7 +7990,7 @@ var HonchoClient = class {
   async ensureAgentPeer(companyId, agent) {
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id),
+      peerIdForAgent(agent.id, agent.name),
       {
         company_id: companyId,
         agent_id: agent.id,
@@ -8079,6 +8094,36 @@ var HonchoClient = class {
       }
     );
   }
+  async listSessionMessageMetadata(companyId, sessionId) {
+    const workspaceId = await this.workspaceId(companyId);
+    const items = [];
+    let page = 1;
+    let pages = 1;
+    while (page <= pages) {
+      const payload = await requestJson(
+        this.ctx,
+        this.config,
+        this.apiKey,
+        `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/list?page=${page}&size=200`,
+        {
+          method: "POST",
+          body: JSON.stringify({})
+        }
+      );
+      const nextItems = Array.isArray(payload.items) ? payload.items : [];
+      for (const item of nextItems) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const metadata = item.metadata;
+          if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+            items.push(metadata);
+          }
+        }
+      }
+      pages = typeof payload.pages === "number" && Number.isFinite(payload.pages) && payload.pages > 0 ? payload.pages : page;
+      page += 1;
+    }
+    return items;
+  }
   async getIssueContext(companyId, issueId, userPeerId) {
     const sessionId = await this.ensureSession(companyId, issueId);
     return await this.getSessionContext(companyId, sessionId, userPeerId, issueId);
@@ -8122,11 +8167,12 @@ var HonchoClient = class {
   }
   async getPeerRepresentation(companyId, agentId, params) {
     const workspaceId = await this.workspaceId(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8139,10 +8185,11 @@ var HonchoClient = class {
   }
   async searchMemory(companyId, agentId, params) {
     const agent = await this.ctx.agents.get(agentId, companyId);
+    const agentPeerId = peerIdForAgent(agentId, agent?.name ?? null);
     if (agent) {
       await this.ensureAgentPeer(companyId, agent);
     } else {
-      await this.ensurePeer(companyId, peerIdForAgent(agentId), {
+      await this.ensurePeer(companyId, agentPeerId, {
         company_id: companyId,
         agent_id: agentId
       }, {
@@ -8156,7 +8203,7 @@ var HonchoClient = class {
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/representation`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/representation`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8180,11 +8227,12 @@ var HonchoClient = class {
   }
   async askPeer(companyId, agentId, params) {
     const workspaceId = await this.ensureWorkspace(companyId);
+    const agentPeerId = await this.agentPeerId(companyId, agentId);
     const payload = await requestJson(
       this.ctx,
       this.config,
       this.apiKey,
-      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(peerIdForAgent(agentId))}/chat`,
+      `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/peers/${encodeURIComponent(agentPeerId)}/chat`,
       {
         method: "POST",
         body: JSON.stringify({
@@ -8207,6 +8255,163 @@ var HonchoClient = class {
 async function createHonchoClient(input) {
   const apiKey = input.config.honchoApiKey ? await input.ctx.secrets.resolve(input.config.honchoApiKey) : null;
   return new HonchoClient({ ...input, apiKey });
+}
+
+// src/state.ts
+var EMPTY_ISSUE_STATUS = {
+  lastSyncedCommentId: null,
+  lastSyncedCommentCreatedAt: null,
+  lastSyncedDocumentRevisionKey: null,
+  lastSyncedDocumentRevisionId: null,
+  lastSyncedRunId: null,
+  lastSyncedRunFinishedAt: null,
+  lastBackfillAt: null,
+  replayRequestedAt: null,
+  replayInProgress: false,
+  lastError: null,
+  latestContextPreview: null,
+  latestContextFetchedAt: null,
+  latestAppendAt: null,
+  latestPromptContextPreview: null,
+  latestPromptContextBuiltAt: null,
+  latestHierarchyContextPreview: null
+};
+var EMPTY_COMPANY_STATUS = {
+  connectionStatus: "not_configured",
+  workspaceStatus: "unknown",
+  peerStatus: "not_started",
+  initializationStatus: "not_started",
+  migrationStatus: "not_started",
+  promptContextStatus: "inactive",
+  lastSuccessfulSyncAt: null,
+  lastError: null,
+  pendingFailureCount: 0,
+  lastInitializationReport: null,
+  latestMigrationPreview: null
+};
+var EMPTY_COMPANY_CHECKPOINT = {
+  activeJobKey: null,
+  status: "idle",
+  processed: 0,
+  succeeded: 0,
+  skipped: 0,
+  failed: 0,
+  currentSourceType: null,
+  currentEntityId: null,
+  lastError: null,
+  updatedAt: null
+};
+function issueStateKey(issueId) {
+  return {
+    scopeKind: "issue",
+    scopeId: issueId,
+    namespace: STATE_NAMESPACE,
+    stateKey: ISSUE_STATUS_STATE_KEY
+  };
+}
+function companyStateKey(companyId) {
+  return {
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: STATE_NAMESPACE,
+    stateKey: COMPANY_STATUS_STATE_KEY
+  };
+}
+function companyCheckpointStateKey(companyId) {
+  return {
+    scopeKind: "company",
+    scopeId: companyId,
+    namespace: STATE_NAMESPACE,
+    stateKey: COMPANY_CHECKPOINT_STATE_KEY
+  };
+}
+function instanceJobTargetsStateKey() {
+  return {
+    scopeKind: "instance",
+    namespace: STATE_NAMESPACE,
+    stateKey: INSTANCE_JOB_TARGETS_STATE_KEY
+  };
+}
+async function getIssueSyncStatus(ctx, issueId) {
+  const value = await ctx.state.get(issueStateKey(issueId));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...EMPTY_ISSUE_STATUS };
+  }
+  return { ...EMPTY_ISSUE_STATUS, ...value };
+}
+async function setIssueSyncStatus(ctx, issueId, status) {
+  await ctx.state.set(issueStateKey(issueId), status);
+}
+async function patchIssueSyncStatus(ctx, issueId, patch) {
+  const next = { ...await getIssueSyncStatus(ctx, issueId), ...patch };
+  await setIssueSyncStatus(ctx, issueId, next);
+  return next;
+}
+async function clearIssueSyncStatus(ctx, issueId) {
+  await ctx.state.delete(issueStateKey(issueId));
+}
+async function getCompanySyncStatus(ctx, companyId) {
+  const value = await ctx.state.get(companyStateKey(companyId));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...EMPTY_COMPANY_STATUS };
+  }
+  return { ...EMPTY_COMPANY_STATUS, ...value };
+}
+async function patchCompanySyncStatus(ctx, companyId, patch) {
+  const next = { ...await getCompanySyncStatus(ctx, companyId), ...patch };
+  await ctx.state.set(companyStateKey(companyId), next);
+  return next;
+}
+async function getCompanyCheckpoint(ctx, companyId) {
+  const value = await ctx.state.get(companyCheckpointStateKey(companyId));
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ...EMPTY_COMPANY_CHECKPOINT };
+  }
+  return { ...EMPTY_COMPANY_CHECKPOINT, ...value };
+}
+async function patchCompanyCheckpoint(ctx, companyId, patch) {
+  const next = { ...await getCompanyCheckpoint(ctx, companyId), ...patch };
+  await ctx.state.set(companyCheckpointStateKey(companyId), next);
+  return next;
+}
+async function getInstanceJobTargets(ctx) {
+  const value = await ctx.state.get(instanceJobTargetsStateKey());
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return { ...value };
+}
+async function setPreparedJobCompany(ctx, jobKey, companyId) {
+  const next = {
+    ...await getInstanceJobTargets(ctx),
+    [jobKey]: companyId
+  };
+  await ctx.state.set(instanceJobTargetsStateKey(), next);
+}
+async function consumePreparedJobCompany(ctx, jobKey) {
+  const targets = await getInstanceJobTargets(ctx);
+  const companyId = typeof targets[jobKey] === "string" && targets[jobKey].trim().length > 0 ? targets[jobKey] : null;
+  if (!companyId) {
+    return null;
+  }
+  const next = { ...targets };
+  delete next[jobKey];
+  if (Object.keys(next).length === 0) {
+    await ctx.state.delete(instanceJobTargetsStateKey());
+  } else {
+    await ctx.state.set(instanceJobTargetsStateKey(), next);
+  }
+  return companyId;
+}
+function buildSyncErrorSummary(input) {
+  return {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    message: input.message,
+    code: input.code ?? null,
+    issueId: input.issueId ?? null,
+    commentId: input.commentId ?? null,
+    documentKey: input.documentKey ?? null
+  };
 }
 
 // src/provenance.ts
@@ -8284,132 +8489,14 @@ function splitDocumentIntoSections(document, revision, sectionSize, overlap) {
   return sections;
 }
 
-// src/state.ts
-var EMPTY_ISSUE_STATUS = {
-  lastSyncedCommentId: null,
-  lastSyncedCommentCreatedAt: null,
-  lastSyncedDocumentRevisionKey: null,
-  lastSyncedDocumentRevisionId: null,
-  lastSyncedRunId: null,
-  lastSyncedRunFinishedAt: null,
-  lastBackfillAt: null,
-  replayRequestedAt: null,
-  replayInProgress: false,
-  lastError: null,
-  latestContextPreview: null,
-  latestContextFetchedAt: null,
-  latestAppendAt: null,
-  latestPromptContextPreview: null,
-  latestPromptContextBuiltAt: null,
-  latestHierarchyContextPreview: null
-};
-var EMPTY_COMPANY_STATUS = {
-  connectionStatus: "not_configured",
-  workspaceStatus: "unknown",
-  peerStatus: "not_started",
-  initializationStatus: "not_started",
-  migrationStatus: "not_started",
-  promptContextStatus: "inactive",
-  lastSuccessfulSyncAt: null,
-  lastError: null,
-  pendingFailureCount: 0,
-  lastInitializationReport: null,
-  latestMigrationPreview: null
-};
-var EMPTY_COMPANY_CHECKPOINT = {
-  activeJobKey: null,
-  status: "idle",
-  processed: 0,
-  succeeded: 0,
-  skipped: 0,
-  failed: 0,
-  currentSourceType: null,
-  currentEntityId: null,
-  lastError: null,
-  updatedAt: null
-};
-function issueStateKey(issueId) {
-  return {
-    scopeKind: "issue",
-    scopeId: issueId,
-    namespace: STATE_NAMESPACE,
-    stateKey: ISSUE_STATUS_STATE_KEY
-  };
-}
-function companyStateKey(companyId) {
-  return {
-    scopeKind: "company",
-    scopeId: companyId,
-    namespace: STATE_NAMESPACE,
-    stateKey: COMPANY_STATUS_STATE_KEY
-  };
-}
-function companyCheckpointStateKey(companyId) {
-  return {
-    scopeKind: "company",
-    scopeId: companyId,
-    namespace: STATE_NAMESPACE,
-    stateKey: COMPANY_CHECKPOINT_STATE_KEY
-  };
-}
-async function getIssueSyncStatus(ctx, issueId) {
-  const value = await ctx.state.get(issueStateKey(issueId));
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ...EMPTY_ISSUE_STATUS };
-  }
-  return { ...EMPTY_ISSUE_STATUS, ...value };
-}
-async function setIssueSyncStatus(ctx, issueId, status) {
-  await ctx.state.set(issueStateKey(issueId), status);
-}
-async function patchIssueSyncStatus(ctx, issueId, patch) {
-  const next = { ...await getIssueSyncStatus(ctx, issueId), ...patch };
-  await setIssueSyncStatus(ctx, issueId, next);
-  return next;
-}
-async function clearIssueSyncStatus(ctx, issueId) {
-  await ctx.state.delete(issueStateKey(issueId));
-}
-async function getCompanySyncStatus(ctx, companyId) {
-  const value = await ctx.state.get(companyStateKey(companyId));
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ...EMPTY_COMPANY_STATUS };
-  }
-  return { ...EMPTY_COMPANY_STATUS, ...value };
-}
-async function patchCompanySyncStatus(ctx, companyId, patch) {
-  const next = { ...await getCompanySyncStatus(ctx, companyId), ...patch };
-  await ctx.state.set(companyStateKey(companyId), next);
-  return next;
-}
-async function getCompanyCheckpoint(ctx, companyId) {
-  const value = await ctx.state.get(companyCheckpointStateKey(companyId));
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { ...EMPTY_COMPANY_CHECKPOINT };
-  }
-  return { ...EMPTY_COMPANY_CHECKPOINT, ...value };
-}
-async function patchCompanyCheckpoint(ctx, companyId, patch) {
-  const next = { ...await getCompanyCheckpoint(ctx, companyId), ...patch };
-  await ctx.state.set(companyCheckpointStateKey(companyId), next);
-  return next;
-}
-function buildSyncErrorSummary(input) {
-  return {
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    message: input.message,
-    code: input.code ?? null,
-    issueId: input.issueId ?? null,
-    commentId: input.commentId ?? null,
-    documentKey: input.documentKey ?? null
-  };
-}
-
 // src/sync.ts
 var migrationCandidatesLoaderOverride = null;
 var issueSyncQueue = /* @__PURE__ */ new Map();
-async function resolvePeerIdFromActor(_ctx, _companyId, actor) {
-  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
+async function resolvePeerIdFromActor(ctx, companyId, actor) {
+  if (actor.authorType === "agent") {
+    const agent = await ctx.agents.get(actor.authorId, companyId);
+    return peerIdForAgent(actor.authorId, agent?.name ?? null);
+  }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -8787,10 +8874,103 @@ async function buildMigrationCandidates(ctx, companyId) {
   });
 }
 async function loadMigrationCandidates(ctx, companyId) {
-  if (migrationCandidatesLoaderOverride) {
-    return await migrationCandidatesLoaderOverride(ctx, companyId);
+  const candidates = migrationCandidatesLoaderOverride ? await migrationCandidatesLoaderOverride(ctx, companyId) : await buildMigrationCandidates(ctx, companyId);
+  return await filterAlreadySyncedMigrationCandidates(ctx, candidates);
+}
+function extractDocumentRevisionId(candidate) {
+  if (candidate.sourceType !== "issue_documents") return null;
+  const [revisionId] = candidate.sourceId.split(":", 1);
+  return revisionId?.trim() ? revisionId : null;
+}
+function candidateSessionProvenanceKey(candidate) {
+  if (candidate.sourceType === "issue_comments") {
+    return `comment:${candidate.sourceId}`;
   }
-  return await buildMigrationCandidates(ctx, companyId);
+  if (candidate.sourceType === "issue_documents") {
+    const revisionId = extractDocumentRevisionId(candidate);
+    const sectionKey = typeof candidate.metadata.sectionKey === "string" ? candidate.metadata.sectionKey : null;
+    if (!revisionId || !sectionKey) return null;
+    return `document:${revisionId}:${sectionKey}`;
+  }
+  return null;
+}
+function metadataSessionProvenanceKeys(metadata) {
+  const keys = [];
+  if (typeof metadata.commentId === "string" && metadata.commentId.trim()) {
+    keys.push(`comment:${metadata.commentId}`);
+  }
+  if (typeof metadata.documentRevisionId === "string" && metadata.documentRevisionId.trim() && typeof metadata.sectionKey === "string" && metadata.sectionKey.trim()) {
+    keys.push(`document:${metadata.documentRevisionId}:${metadata.sectionKey}`);
+  }
+  return keys;
+}
+function coveredCommentIds(candidates, lastSyncedCommentId, lastSyncedCommentCreatedAt) {
+  if (!lastSyncedCommentId && !lastSyncedCommentCreatedAt) {
+    return /* @__PURE__ */ new Set();
+  }
+  const cutoff = lastSyncedCommentCreatedAt ? Date.parse(lastSyncedCommentCreatedAt) : Number.NaN;
+  const covered = /* @__PURE__ */ new Set();
+  let matchedLastSynced = false;
+  for (const candidate of candidates) {
+    if (candidate.sourceType !== "issue_comments") continue;
+    if (Number.isFinite(cutoff) && Date.parse(candidate.createdAt) <= cutoff) {
+      covered.add(candidate.sourceId);
+    }
+    if (candidate.sourceId === lastSyncedCommentId) {
+      covered.add(candidate.sourceId);
+      matchedLastSynced = true;
+      break;
+    }
+  }
+  if (matchedLastSynced || Number.isFinite(cutoff)) {
+    return covered;
+  }
+  return /* @__PURE__ */ new Set();
+}
+function coveredDocumentRevisionIds(candidates, lastSyncedDocumentRevisionId) {
+  if (!lastSyncedDocumentRevisionId) {
+    return /* @__PURE__ */ new Set();
+  }
+  const covered = /* @__PURE__ */ new Set();
+  for (const candidate of candidates) {
+    const revisionId = extractDocumentRevisionId(candidate);
+    if (!revisionId) continue;
+    covered.add(revisionId);
+    if (revisionId === lastSyncedDocumentRevisionId) {
+      return covered;
+    }
+  }
+  return /* @__PURE__ */ new Set();
+}
+async function filterAlreadySyncedMigrationCandidates(ctx, candidates) {
+  const byIssue = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    if (!candidate.issueId) continue;
+    const existing = byIssue.get(candidate.issueId) ?? [];
+    existing.push(candidate);
+    byIssue.set(candidate.issueId, existing);
+  }
+  const coverage = /* @__PURE__ */ new Map();
+  for (const [issueId, issueCandidates] of byIssue.entries()) {
+    const status = await getIssueSyncStatus(ctx, issueId);
+    coverage.set(issueId, {
+      commentIds: coveredCommentIds(issueCandidates, status.lastSyncedCommentId, status.lastSyncedCommentCreatedAt),
+      revisionIds: coveredDocumentRevisionIds(issueCandidates, status.lastSyncedDocumentRevisionId)
+    });
+  }
+  return candidates.filter((candidate) => {
+    if (!candidate.issueId) return true;
+    const issueCoverage = coverage.get(candidate.issueId);
+    if (!issueCoverage) return true;
+    if (candidate.sourceType === "issue_comments") {
+      return !issueCoverage.commentIds.has(candidate.sourceId);
+    }
+    if (candidate.sourceType === "issue_documents") {
+      const revisionId = extractDocumentRevisionId(candidate);
+      return !revisionId || !issueCoverage.revisionIds.has(revisionId);
+    }
+    return true;
+  });
 }
 async function runIssueSyncExclusive(companyId, issueId, work) {
   const queueKey = `${companyId}:${issueId}`;
@@ -8891,7 +9071,7 @@ async function buildMemoryStatusData(ctx, companyId) {
     jobs
   };
 }
-async function ensureMigrationCandidateImported(ctx, companyId, candidate, config, client) {
+async function ensureMigrationCandidateImported(ctx, companyId, candidate, config, client, sessionProvenanceCache) {
   const externalId = candidate.sourceType === "issue_comments" ? `paperclip:comment:${candidate.sourceId}` : candidate.sourceType === "issue_documents" ? `paperclip:document:${candidate.sourceId}` : candidate.workspaceId && candidate.metadata.relativePath ? fileExternalId(candidate.workspaceId, String(candidate.metadata.relativePath)) : candidate.sourceId;
   const existing = await getImportLedgerRecord(ctx, companyId, externalId);
   if (existing && existing.data.fingerprint === candidate.fingerprint) {
@@ -8907,6 +9087,30 @@ async function ensureMigrationCandidateImported(ctx, companyId, candidate, confi
     }
     await client.ensureIssueSession(issue, company);
     await upsertSessionMapping(ctx, issue, workspaceId);
+    const candidateProvenanceKey = candidateSessionProvenanceKey(candidate);
+    let existingSessionProvenance = sessionProvenanceCache.get(issue.id);
+    if (!existingSessionProvenance) {
+      const sessionId = await resolveCanonicalIssueSessionId(
+        ctx,
+        issue.id,
+        issue.identifier ?? null
+      );
+      const metadataItems = await client.listSessionMessageMetadata(companyId, sessionId);
+      existingSessionProvenance = new Set(metadataItems.flatMap((metadata) => metadataSessionProvenanceKeys(metadata)));
+      sessionProvenanceCache.set(issue.id, existingSessionProvenance);
+    }
+    if (candidateProvenanceKey && existingSessionProvenance.has(candidateProvenanceKey)) {
+      await upsertImportLedger(ctx, companyId, {
+        sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
+        externalId,
+        fingerprint: candidate.fingerprint,
+        issueId: candidate.issueId,
+        issueIdentifier: candidate.issueIdentifier,
+        importedAt: (/* @__PURE__ */ new Date()).toISOString(),
+        metadata: candidate.metadata
+      });
+      return { imported: false, skipped: true };
+    }
     const actor = {
       authorType: candidate.authorType,
       authorId: candidate.authorId
@@ -8928,12 +9132,15 @@ async function ensureMigrationCandidateImported(ctx, companyId, candidate, confi
       importedAt: (/* @__PURE__ */ new Date()).toISOString(),
       metadata: candidate.metadata
     });
+    if (candidateProvenanceKey) {
+      existingSessionProvenance.add(candidateProvenanceKey);
+    }
   } else {
     const isGuidance = candidate.sourceType === "workspace_guidance_files";
     const isAgentProfile = candidate.sourceType === "agent_profile_files";
     const agentProfileId = isAgentProfile && typeof candidate.metadata.authorId === "string" ? String(candidate.metadata.authorId).replace(/^agent:/, "") : null;
     const agentProfile = agentProfileId ? await ctx.agents.get(agentProfileId, companyId) : null;
-    const peerId = isGuidance ? systemPeerId() : agentProfile ? peerIdForAgent(agentProfile.id) : ownerPeerIdForCompany(companyId);
+    const peerId = isGuidance ? systemPeerId() : agentProfile ? peerIdForAgent(agentProfile.id, agentProfile.name) : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {
         company_id: companyId,
@@ -9043,6 +9250,7 @@ async function importMigrationPreview(ctx, companyId) {
   const preview = (await getCompanySyncStatus(ctx, companyId)).latestMigrationPreview ?? await scanMigrationSources(ctx, companyId);
   const candidates = await loadMigrationCandidates(ctx, companyId);
   const client = await createHonchoClient({ ctx, config });
+  const sessionProvenanceCache = /* @__PURE__ */ new Map();
   let processed = 0;
   let succeeded = 0;
   let skipped = 0;
@@ -9075,7 +9283,7 @@ async function importMigrationPreview(ctx, companyId) {
       currentEntityId: candidate.sourceId
     });
     try {
-      const result = await ensureMigrationCandidateImported(ctx, companyId, candidate, config, client);
+      const result = await ensureMigrationCandidateImported(ctx, companyId, candidate, config, client, sessionProvenanceCache);
       if (result.imported) {
         succeeded += 1;
       } else {
@@ -9588,6 +9796,11 @@ var plugin = definePlugin({
       const companyId = requireString(params.companyId, "companyId");
       return await replayIssue(ctx, issueId, companyId);
     });
+    ctx.actions.register(ACTION_KEYS.initializeMemoryForCompany, async (params) => {
+      const companyId = requireString(params.companyId, "companyId");
+      await setPreparedJobCompany(ctx, JOB_KEYS.initializeMemory, companyId);
+      return { ok: true, companyId };
+    });
     ctx.actions.register(ACTION_KEYS.probePromptContext, async (params) => {
       const companyId = requireString(params.companyId, "companyId");
       return await probePromptContext(ctx, companyId, {
@@ -9597,8 +9810,7 @@ var plugin = definePlugin({
       });
     });
     ctx.jobs.register(JOB_KEYS.initializeMemory, async () => {
-      const companies = await ctx.companies.list({ limit: 1, offset: 0 });
-      const companyId = companies[0]?.id;
+      const companyId = await consumePreparedJobCompany(ctx, JOB_KEYS.initializeMemory) ?? (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id;
       if (!companyId) throw new Error("No company available to initialize memory");
       await initializeMemory(ctx, companyId);
     });

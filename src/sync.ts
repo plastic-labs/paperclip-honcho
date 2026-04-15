@@ -47,6 +47,7 @@ import {
   getImportLedgerRecord,
   listJobsForUi,
   listMappingCounts,
+  resolveCanonicalIssueSessionId,
   upsertAgentPeerMapping,
   upsertBootstrapSessionMapping,
   upsertFileImportSource,
@@ -92,11 +93,14 @@ let migrationCandidatesLoaderOverride: MigrationCandidatesLoader | null = null;
 const issueSyncQueue = new Map<string, Promise<void>>();
 
 async function resolvePeerIdFromActor(
-  _ctx: PluginContext,
-  _companyId: string,
+  ctx: PluginContext,
+  companyId: string,
   actor: HonchoActor,
 ): Promise<string> {
-  if (actor.authorType === "agent") return peerIdForAgent(actor.authorId);
+  if (actor.authorType === "agent") {
+    const agent = await ctx.agents.get(actor.authorId, companyId);
+    return peerIdForAgent(actor.authorId, agent?.name ?? null);
+  }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
 }
@@ -564,10 +568,128 @@ async function loadMigrationCandidates(
   ctx: PluginContext,
   companyId: string,
 ): Promise<MigrationSourceCandidate[]> {
-  if (migrationCandidatesLoaderOverride) {
-    return await migrationCandidatesLoaderOverride(ctx, companyId);
+  const candidates = migrationCandidatesLoaderOverride
+    ? await migrationCandidatesLoaderOverride(ctx, companyId)
+    : await buildMigrationCandidates(ctx, companyId);
+  return await filterAlreadySyncedMigrationCandidates(ctx, candidates);
+}
+
+function extractDocumentRevisionId(candidate: MigrationSourceCandidate): string | null {
+  if (candidate.sourceType !== "issue_documents") return null;
+  const [revisionId] = candidate.sourceId.split(":", 1);
+  return revisionId?.trim() ? revisionId : null;
+}
+
+function candidateSessionProvenanceKey(candidate: MigrationSourceCandidate): string | null {
+  if (candidate.sourceType === "issue_comments") {
+    return `comment:${candidate.sourceId}`;
   }
-  return await buildMigrationCandidates(ctx, companyId);
+  if (candidate.sourceType === "issue_documents") {
+    const revisionId = extractDocumentRevisionId(candidate);
+    const sectionKey = typeof candidate.metadata.sectionKey === "string" ? candidate.metadata.sectionKey : null;
+    if (!revisionId || !sectionKey) return null;
+    return `document:${revisionId}:${sectionKey}`;
+  }
+  return null;
+}
+
+function metadataSessionProvenanceKeys(metadata: Record<string, unknown>): string[] {
+  const keys: string[] = [];
+  if (typeof metadata.commentId === "string" && metadata.commentId.trim()) {
+    keys.push(`comment:${metadata.commentId}`);
+  }
+  if (
+    typeof metadata.documentRevisionId === "string"
+    && metadata.documentRevisionId.trim()
+    && typeof metadata.sectionKey === "string"
+    && metadata.sectionKey.trim()
+  ) {
+    keys.push(`document:${metadata.documentRevisionId}:${metadata.sectionKey}`);
+  }
+  return keys;
+}
+
+function coveredCommentIds(
+  candidates: MigrationSourceCandidate[],
+  lastSyncedCommentId: string | null,
+  lastSyncedCommentCreatedAt: string | null,
+): Set<string> {
+  if (!lastSyncedCommentId && !lastSyncedCommentCreatedAt) {
+    return new Set<string>();
+  }
+  const cutoff = lastSyncedCommentCreatedAt ? Date.parse(lastSyncedCommentCreatedAt) : Number.NaN;
+  const covered = new Set<string>();
+  let matchedLastSynced = false;
+  for (const candidate of candidates) {
+    if (candidate.sourceType !== "issue_comments") continue;
+    if (Number.isFinite(cutoff) && Date.parse(candidate.createdAt) <= cutoff) {
+      covered.add(candidate.sourceId);
+    }
+    if (candidate.sourceId === lastSyncedCommentId) {
+      covered.add(candidate.sourceId);
+      matchedLastSynced = true;
+      break;
+    }
+  }
+  if (matchedLastSynced || Number.isFinite(cutoff)) {
+    return covered;
+  }
+  return new Set<string>();
+}
+
+function coveredDocumentRevisionIds(
+  candidates: MigrationSourceCandidate[],
+  lastSyncedDocumentRevisionId: string | null,
+): Set<string> {
+  if (!lastSyncedDocumentRevisionId) {
+    return new Set<string>();
+  }
+  const covered = new Set<string>();
+  for (const candidate of candidates) {
+    const revisionId = extractDocumentRevisionId(candidate);
+    if (!revisionId) continue;
+    covered.add(revisionId);
+    if (revisionId === lastSyncedDocumentRevisionId) {
+      return covered;
+    }
+  }
+  return new Set<string>();
+}
+
+async function filterAlreadySyncedMigrationCandidates(
+  ctx: PluginContext,
+  candidates: MigrationSourceCandidate[],
+): Promise<MigrationSourceCandidate[]> {
+  const byIssue = new Map<string, MigrationSourceCandidate[]>();
+  for (const candidate of candidates) {
+    if (!candidate.issueId) continue;
+    const existing = byIssue.get(candidate.issueId) ?? [];
+    existing.push(candidate);
+    byIssue.set(candidate.issueId, existing);
+  }
+
+  const coverage = new Map<string, { commentIds: Set<string>; revisionIds: Set<string> }>();
+  for (const [issueId, issueCandidates] of byIssue.entries()) {
+    const status = await getIssueSyncStatus(ctx, issueId);
+    coverage.set(issueId, {
+      commentIds: coveredCommentIds(issueCandidates, status.lastSyncedCommentId, status.lastSyncedCommentCreatedAt),
+      revisionIds: coveredDocumentRevisionIds(issueCandidates, status.lastSyncedDocumentRevisionId),
+    });
+  }
+
+  return candidates.filter((candidate) => {
+    if (!candidate.issueId) return true;
+    const issueCoverage = coverage.get(candidate.issueId);
+    if (!issueCoverage) return true;
+    if (candidate.sourceType === "issue_comments") {
+      return !issueCoverage.commentIds.has(candidate.sourceId);
+    }
+    if (candidate.sourceType === "issue_documents") {
+      const revisionId = extractDocumentRevisionId(candidate);
+      return !revisionId || !issueCoverage.revisionIds.has(revisionId);
+    }
+    return true;
+  });
 }
 
 export function setMigrationCandidatesLoaderForTests(loader: MigrationCandidatesLoader | null) {
@@ -691,6 +813,7 @@ async function ensureMigrationCandidateImported(
   candidate: MigrationSourceCandidate,
   config: HonchoResolvedConfig,
   client: Awaited<ReturnType<typeof createHonchoClient>>,
+  sessionProvenanceCache: Map<string, Set<string>>,
 ) {
   const externalId = candidate.sourceType === "issue_comments"
     ? `paperclip:comment:${candidate.sourceId}`
@@ -716,6 +839,31 @@ async function ensureMigrationCandidateImported(
     await client.ensureIssueSession(issue, company);
     await upsertSessionMapping(ctx, issue, workspaceId);
 
+    const candidateProvenanceKey = candidateSessionProvenanceKey(candidate);
+    let existingSessionProvenance = sessionProvenanceCache.get(issue.id);
+    if (!existingSessionProvenance) {
+      const sessionId = await resolveCanonicalIssueSessionId(
+        ctx,
+        issue.id,
+        issue.identifier ?? null,
+      );
+      const metadataItems = await client.listSessionMessageMetadata(companyId, sessionId);
+      existingSessionProvenance = new Set(metadataItems.flatMap((metadata) => metadataSessionProvenanceKeys(metadata)));
+      sessionProvenanceCache.set(issue.id, existingSessionProvenance);
+    }
+    if (candidateProvenanceKey && existingSessionProvenance.has(candidateProvenanceKey)) {
+      await upsertImportLedger(ctx, companyId, {
+        sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
+        externalId,
+        fingerprint: candidate.fingerprint,
+        issueId: candidate.issueId,
+        issueIdentifier: candidate.issueIdentifier,
+        importedAt: new Date().toISOString(),
+        metadata: candidate.metadata,
+      });
+      return { imported: false, skipped: true };
+    }
+
     const actor: HonchoActor = {
       authorType: candidate.authorType,
       authorId: candidate.authorId,
@@ -739,6 +887,9 @@ async function ensureMigrationCandidateImported(
       importedAt: new Date().toISOString(),
       metadata: candidate.metadata,
     });
+    if (candidateProvenanceKey) {
+      existingSessionProvenance.add(candidateProvenanceKey);
+    }
   } else {
     const isGuidance = candidate.sourceType === "workspace_guidance_files";
     const isAgentProfile = candidate.sourceType === "agent_profile_files";
@@ -749,7 +900,7 @@ async function ensureMigrationCandidateImported(
     const peerId = isGuidance
       ? systemPeerId()
       : agentProfile
-        ? peerIdForAgent(agentProfile.id)
+        ? peerIdForAgent(agentProfile.id, agentProfile.name)
         : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {
@@ -866,6 +1017,7 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
   const preview = (await getCompanySyncStatus(ctx, companyId)).latestMigrationPreview ?? await scanMigrationSources(ctx, companyId);
   const candidates = await loadMigrationCandidates(ctx, companyId);
   const client = await createHonchoClient({ ctx, config });
+  const sessionProvenanceCache = new Map<string, Set<string>>();
   let processed = 0;
   let succeeded = 0;
   let skipped = 0;
@@ -900,7 +1052,7 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
       currentEntityId: candidate.sourceId,
     });
     try {
-      const result = await ensureMigrationCandidateImported(ctx, companyId, candidate, config, client);
+      const result = await ensureMigrationCandidateImported(ctx, companyId, candidate, config, client, sessionProvenanceCache);
       if (result.imported) {
         succeeded += 1;
       } else {
