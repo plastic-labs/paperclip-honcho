@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Issue, IssueComment } from "@paperclipai/plugin-sdk";
-import { issueEntityUrl, peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "../src/ids.js";
+import { hashId, issueEntityUrl, peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "../src/ids.js";
 import {
   actorFromComment,
   actorFromDocumentRevision,
@@ -35,6 +35,10 @@ describe("honcho units", () => {
     expect(first).toMatch(/^agent_Support_Bot_/);
     expect(second).toMatch(/^agent_Support_Bot_/);
     expect(first).not.toBe(second);
+  });
+
+  it("uses a strong deterministic digest for stable id hashing", () => {
+    expect(hashId("agent_1")).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("builds stable issue entity URLs", () => {

@@ -73,7 +73,7 @@ export function childSessionIdForRun(runId: string): string {
 }
 
 export function hashId(value: string): string {
-  return createHash("sha1").update(value).digest("hex");
+  return createHash("sha256").update(value).digest("hex");
 }
 
 export function fileExternalId(workspaceId: string, relativePath: string): string {

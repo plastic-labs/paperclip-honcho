@@ -7480,7 +7480,7 @@ function childSessionIdForRun(runId) {
   return joinHonchoId(["run", runId]);
 }
 function hashId(value) {
-  return createHash("sha1").update(value).digest("hex");
+  return createHash("sha256").update(value).digest("hex");
 }
 function fileExternalId(workspaceId, relativePath) {
   return `paperclip:file:${workspaceId}:${hashId(relativePath)}`;
