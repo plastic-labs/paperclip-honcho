@@ -7696,11 +7696,19 @@ async function getSessionMappingRecord(ctx, issueId) {
   return records[0] ?? null;
 }
 async function resolveCanonicalWorkspaceId(ctx, companyId, workspacePrefix) {
+  const company = await ctx.companies.get(companyId);
+  const expectedWorkspaceId = workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim() ? mapping.data.workspaceId : null;
-  if (mappedWorkspaceId) return mappedWorkspaceId;
-  const company = await ctx.companies.get(companyId);
-  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
+  if (mappedWorkspaceId) {
+    if (mappedWorkspaceId !== expectedWorkspaceId) {
+      throw new Error(
+        `Workspace mapping mismatch for company '${companyId}': mapped workspace '${mappedWorkspaceId}' does not match expected workspace '${expectedWorkspaceId}'`
+      );
+    }
+    return mappedWorkspaceId;
+  }
+  return expectedWorkspaceId;
 }
 async function resolveCanonicalIssueSessionId(ctx, issueId, issueIdentifier) {
   const mapping = await getSessionMappingRecord(ctx, issueId);

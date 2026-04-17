@@ -339,13 +339,21 @@ export async function resolveCanonicalWorkspaceId(
   companyId: string,
   workspacePrefix: string,
 ) {
+  const company = await ctx.companies.get(companyId);
+  const expectedWorkspaceId = workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
     ? mapping.data.workspaceId
     : null;
-  if (mappedWorkspaceId) return mappedWorkspaceId;
-  const company = await ctx.companies.get(companyId);
-  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
+  if (mappedWorkspaceId) {
+    if (mappedWorkspaceId !== expectedWorkspaceId) {
+      throw new Error(
+        `Workspace mapping mismatch for company '${companyId}': mapped workspace '${mappedWorkspaceId}' does not match expected workspace '${expectedWorkspaceId}'`,
+      );
+    }
+    return mappedWorkspaceId;
+  }
+  return expectedWorkspaceId;
 }
 
 export async function resolveCanonicalIssueSessionId(

@@ -86,7 +86,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("continues using the stored workspace mapping even if workspacePrefix changes later", async () => {
+  it("fails closed when a stored workspace mapping points at a different workspace", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -110,16 +110,13 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.executeTool("honcho_get_issue_context", { issueId: "iss_1" }, {
-      companyId: "co_1",
-      projectId: "proj_1",
-      agentId: "agent_1",
-      runId: "run_1",
-    });
+    await expect(harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" })).rejects.toThrow(
+      `mapped workspace 'paperclip_co_1' does not match expected workspace '${companyWorkspaceId}'`,
+    );
 
-    const contextRequest = requestsMatching(requests, "/context?")[0];
-    expect(contextRequest?.url).toContain("/v3/workspaces/paperclip_co_1/");
-    expect(contextRequest?.url).not.toContain("/v3/workspaces/renamed_co_1/");
+    expect(requestsMatching(requests, "/peers")).toHaveLength(0);
+    expect(requestsMatching(requests, "/sessions")).toHaveLength(0);
+    expect(requestsMatching(requests, "/messages")).toHaveLength(0);
   });
 
   it("initialize-memory works against self-hosted Honcho without an API key secret", async () => {
@@ -564,7 +561,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("initialize-memory preserves the stored workspace mapping when workspacePrefix changes later", async () => {
+  it("initialize-memory fails before writing into a mismatched stored workspace", async () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -588,7 +585,9 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await expect(harness.runJob("initialize-memory")).rejects.toThrow(
+      `mapped workspace 'paperclip_co_1' does not match expected workspace '${companyWorkspaceId}'`,
+    );
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",
@@ -600,9 +599,15 @@ describe("honcho memory jobs", () => {
       workspaceId: "paperclip_co_1",
       workspacePrefix: "paperclip",
     });
-    expect(workspaceMappings[0]?.data).not.toMatchObject({
-      workspaceId: "renamed_co_1",
-      workspacePrefix: "renamed",
+
+    const status = await harness.getData<Record<string, unknown>>("memory-status", {
+      companyId: "co_1",
+    });
+    expect(status.companyStatus).toMatchObject({
+      initializationStatus: "failed",
+      lastError: expect.objectContaining({
+        message: expect.stringContaining("mapped workspace 'paperclip_co_1' does not match expected workspace"),
+      }),
     });
   });
 });
