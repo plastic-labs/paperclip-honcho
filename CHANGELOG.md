@@ -7,11 +7,20 @@ All notable changes to `@honcho-ai/paperclip-honcho` will be documented in this 
 ### Changed
 - Issue sessions now use the Paperclip issue identifier for new Honcho session names so the Honcho dashboard shows the same task label operators see in Paperclip.
 - Existing workspace and issue session mappings are now treated as canonical, preventing later `workspacePrefix` edits from silently remapping Honcho workspaces or sessions.
+- Settings changes now autosave by default with a debounce while keeping explicit save and activation flows available.
+- Migration preview now includes a per-issue mapping breakdown so operators can see which issues will contribute comments and documents before import.
+- Workspace and agent peer IDs are now readable while remaining collision-safe through stable short hashed suffixes.
 
 ### Fixed
 - Fixed `agent_profile_files` imports so they create and map agent peers instead of incorrectly falling through the owner peer path.
 - Restored canonical agent peer IDs so Honcho peers consistently use the Paperclip agent ID instead of drifting to URL-key-based names.
 - Fixed session and workspace lookup paths to honor persisted mappings, keeping reads, writes, and repair actions aligned with previously created Honcho resources.
+- Fixed initialization so the selected company is prepared before `initialize-memory` runs, preventing settings-page success state from hanging on the wrong company.
+- Fixed transient null Honcho responses so initialization and sync retry instead of crashing late.
+- Fixed migration dedupe by checking existing Honcho session provenance once per session and backfilling the import ledger when prior appends already exist.
+- Fixed readable workspace helper generation so `buildWorkspaceId(...)` matches canonical named workspace IDs.
+- Fixed stable ID hashing to use `sha256` instead of `sha1`.
+- Fixed future peer/session contamination by blocking stale workspace mapping reuse when the saved workspace does not match the current canonical workspace.
 
 ## [0.1.1] - 2026-04-10
 
