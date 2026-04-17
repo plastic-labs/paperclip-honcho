@@ -9,6 +9,7 @@ import manifest from "./manifest.js";
 import { ACTION_KEYS, DATA_KEYS, DEFAULT_SEARCH_LIMIT, JOB_KEYS, RUNTIME_LAUNCHERS, TOOL_NAMES } from "./constants.js";
 import { assertConfigured, getResolvedConfig, validateConfig } from "./config.js";
 import { createHonchoClient } from "./honcho-client.js";
+import { consumePreparedJobCompany, setPreparedJobCompany } from "./state.js";
 import {
   initializeMemory,
   getIssueContext,
@@ -21,7 +22,6 @@ import {
   loadMigrationJobStatusData,
   loadMigrationPreviewData,
   probePromptContext,
-  repairMappings,
   replayIssue,
   scanMigrationSources,
   searchMemory,
@@ -97,6 +97,12 @@ const plugin = definePlugin({
       return await replayIssue(ctx, issueId, companyId);
     });
 
+    ctx.actions.register(ACTION_KEYS.initializeMemoryForCompany, async (params) => {
+      const companyId = requireString(params.companyId, "companyId");
+      await setPreparedJobCompany(ctx, JOB_KEYS.initializeMemory, companyId);
+      return { ok: true, companyId };
+    });
+
     ctx.actions.register(ACTION_KEYS.probePromptContext, async (params) => {
       const companyId = requireString(params.companyId, "companyId");
       return await probePromptContext(ctx, companyId, {
@@ -106,14 +112,9 @@ const plugin = definePlugin({
       });
     });
 
-    ctx.actions.register(ACTION_KEYS.repairMappings, async (params) => {
-      const companyId = requireString(params.companyId, "companyId");
-      return await repairMappings(ctx, companyId);
-    });
-
     ctx.jobs.register(JOB_KEYS.initializeMemory, async () => {
-      const companies = await ctx.companies.list({ limit: 1, offset: 0 });
-      const companyId = companies[0]?.id;
+      const companyId = await consumePreparedJobCompany(ctx, JOB_KEYS.initializeMemory)
+        ?? (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id;
       if (!companyId) throw new Error("No company available to initialize memory");
       await initializeMemory(ctx, companyId);
     });

@@ -1,6 +1,6 @@
 {
   "name": "@honcho-ai/paperclip-honcho",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Honcho memory integration for Paperclip",
   "repository": {
@@ -17,7 +17,7 @@
     "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4178",
     "test": "vitest run --config ./vitest.config.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "pnpm build"
+    "prepublishOnly": "npm run build"
   },
   "paperclipPlugin": {
     "manifest": "./dist/manifest.js",

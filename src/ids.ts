@@ -16,11 +16,25 @@ function joinHonchoId(parts: string[]): string {
     .join("_");
 }
 
-export function workspaceIdForCompany(companyId: string, workspacePrefix: string): string {
+function shortStableSuffix(value: string): string {
+  return hashId(value).slice(0, 8);
+}
+
+export function workspaceIdForCompany(
+  companyId: string,
+  workspacePrefix: string,
+  companyName?: string | null,
+): string {
+  if (typeof companyName === "string" && companyName.trim()) {
+    return joinHonchoId([companyName, shortStableSuffix(companyId)]);
+  }
   return joinHonchoId([workspacePrefix, companyId]);
 }
 
-export function peerIdForAgent(agentId: string): string {
+export function peerIdForAgent(agentId: string, agentName?: string | null): string {
+  if (typeof agentName === "string" && agentName.trim()) {
+    return joinHonchoId(["agent", agentName, shortStableSuffix(agentId)]);
+  }
   return joinHonchoId(["agent", agentId]);
 }
 
@@ -56,7 +70,7 @@ export function childSessionIdForRun(runId: string): string {
 }
 
 export function hashId(value: string): string {
-  return createHash("sha1").update(value).digest("hex");
+  return createHash("sha256").update(value).digest("hex");
 }
 
 export function fileExternalId(workspaceId: string, relativePath: string): string {

@@ -4,8 +4,8 @@ import {
   type PluginDetailTabProps,
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
-import { useEffect, useMemo, useState } from "react";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, JOB_KEYS, PLUGIN_ID } from "../constants.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
 import type {
   IssueMemoryStatusData,
   MemoryStatusData,
@@ -101,6 +101,20 @@ const statStyle: React.CSSProperties = {
   ...cardStyle,
   gap: "0.35rem",
   padding: "0.85rem",
+};
+
+const migrationListStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.6rem",
+};
+
+const migrationRowStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "0.2rem",
+  padding: "0.75rem 0.85rem",
+  borderRadius: "12px",
+  background: "rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15, 23, 42, 0.08)",
 };
 
 type CompanySecretRecord = {
@@ -363,6 +377,32 @@ function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutra
   );
 }
 
+function formatMigrationCount(value: number, singular: string, plural: string): string {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+
+function MigrationIssueList({ issues }: { issues: MigrationPreview["issues"] }) {
+  if (issues.length === 0) {
+    return <div style={{ color: "#475569", fontSize: "0.9rem" }}>No issue-backed migration sources found yet.</div>;
+  }
+  return (
+    <div style={migrationListStyle}>
+      {issues.map((issue) => (
+        <div key={issue.issueId} style={migrationRowStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+            <div style={{ fontWeight: 600 }}>{issue.issueIdentifier ?? issue.issueId}</div>
+            <div style={{ color: "#475569", fontSize: "0.9rem" }}>{formatMigrationCount(issue.estimatedMessages, "message", "messages")}</div>
+          </div>
+          {issue.issueTitle ? <div style={{ color: "#475569", fontSize: "0.92rem" }}>{issue.issueTitle}</div> : null}
+          <div style={{ color: "#475569", fontSize: "0.88rem" }}>
+            {`${formatMigrationCount(issue.commentCount, "comment", "comments")} • ${formatMigrationCount(issue.documentCount, "document", "documents")}`}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function countTone(value: string | null | undefined, good: string[] = ["complete", "connected", "active", "mapped", "created"]) {
   if (!value) return "neutral" as const;
   if (good.includes(value)) return "good" as const;
@@ -609,11 +649,13 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
+  const initializeMemoryForCompany = usePluginAction(ACTION_KEYS.initializeMemoryForCompany);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
   const [activationStepIndex, setActivationStepIndex] = useState<number | null>(null);
   const [activationStepLabel, setActivationStepLabel] = useState<string | null>(null);
+  const lastPersistedConfigRef = useRef<string | null>(null);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
@@ -628,6 +670,39 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     preview.refresh();
     jobStatus.refresh();
   }
+
+  function markConfigPersisted(config: SettingsConfig) {
+    lastPersistedConfigRef.current = JSON.stringify(config);
+  }
+
+  useEffect(() => {
+    if (settings.loading) return;
+
+    const serializedConfig = JSON.stringify(settings.configJson);
+    if (lastPersistedConfigRef.current == null) {
+      lastPersistedConfigRef.current = serializedConfig;
+      return;
+    }
+    if (serializedConfig === lastPersistedConfigRef.current || settings.saving || isActivating) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          validateSettingsBeforePersist(settings.configJson);
+          await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
+        } catch (nextError) {
+          setError(formatUnknownError(nextError));
+        }
+      })();
+    }, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isActivating, settings.configJson, settings.loading, settings.saving]);
 
   async function getCheckpointStatus() {
     if (!companyId) return null;
@@ -646,6 +721,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     setNotice(null);
     try {
       await settings.save(settings.configJson);
+      markConfigPersisted(settings.configJson);
       memoryStatus.refresh();
       setNotice("Settings saved.");
     } catch (nextError) {
@@ -664,8 +740,14 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   }
 
   async function triggerJob(jobKey: string) {
+    if (jobKey === JOB_KEYS.initializeMemory) {
+      if (!companyId) {
+        throw new Error("companyId is required");
+      }
+      await initializeMemoryForCompany({ companyId });
+    }
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 5 * 60_000;
+    const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
@@ -688,6 +770,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         run: async () => {
           await validateCurrentSettings();
           await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
         },
       },
       {
@@ -790,6 +873,10 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         <Row label="Legacy files" value={(preview.data as Record<string, unknown> | null)?.totals && typeof (preview.data as Record<string, any>).totals.files === "number" ? (preview.data as Record<string, any>).totals.files : 0} />
         <Row label="Estimated messages" value={preview.data?.estimatedMessages ?? 0} />
         <Row label="Warnings" value={preview.data?.warnings?.join("; ") || "None"} />
+        <div style={{ display: "grid", gap: "0.5rem" }}>
+          <div style={{ fontSize: "0.92rem", fontWeight: 600 }}>Migration mapping</div>
+          <MigrationIssueList issues={preview.data?.issues ?? []} />
+        </div>
       </div>
 
       <div style={cardStyle}>

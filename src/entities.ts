@@ -53,7 +53,9 @@ export async function upsertWorkspaceMapping(
   const mappedWorkspacePrefix = typeof existing?.data.workspacePrefix === "string" && existing.data.workspacePrefix.trim()
     ? existing.data.workspacePrefix
     : null;
-  const canonicalWorkspaceId = mappedWorkspaceId ?? workspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  const canonicalWorkspaceId = mappedWorkspaceId
+    ?? workspaceId
+    ?? workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const canonicalWorkspacePrefix = mappedWorkspacePrefix ?? workspacePrefix;
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
@@ -149,7 +151,7 @@ export async function upsertAgentPeerMapping(
   agent: Agent,
   status: "mapped" | "missing" = "mapped",
 ) {
-  const peerId = peerIdForAgent(agent.id);
+  const peerId = peerIdForAgent(agent.id, agent.name);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -337,11 +339,21 @@ export async function resolveCanonicalWorkspaceId(
   companyId: string,
   workspacePrefix: string,
 ) {
+  const company = await ctx.companies.get(companyId);
+  const expectedWorkspaceId = workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
     ? mapping.data.workspaceId
     : null;
-  return mappedWorkspaceId ?? workspaceIdForCompany(companyId, workspacePrefix);
+  if (mappedWorkspaceId) {
+    if (mappedWorkspaceId !== expectedWorkspaceId) {
+      throw new Error(
+        `Workspace mapping mismatch for company '${companyId}': mapped workspace '${mappedWorkspaceId}' does not match expected workspace '${expectedWorkspaceId}'`,
+      );
+    }
+    return mappedWorkspaceId;
+  }
+  return expectedWorkspaceId;
 }
 
 export async function resolveCanonicalIssueSessionId(
@@ -438,8 +450,8 @@ export async function listJobsForUi(ctx: PluginContext) {
   }));
 }
 
-export function buildWorkspaceId(companyId: string, workspacePrefix: string) {
-  return workspaceIdForCompany(companyId, workspacePrefix);
+export function buildWorkspaceId(companyId: string, workspacePrefix: string, companyName?: string | null) {
+  return workspaceIdForCompany(companyId, workspacePrefix, companyName);
 }
 
 export function buildMigrationReportPayload(companyId: string, preview: MigrationPreview) {

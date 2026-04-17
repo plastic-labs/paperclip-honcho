@@ -3,7 +3,7 @@ import {
   usePluginAction,
   usePluginData
 } from "@paperclipai/plugin-sdk/ui";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 // src/constants.ts
 var PLUGIN_ID = "honcho-ai.paperclip-honcho";
@@ -11,6 +11,8 @@ var DEFAULT_WORKSPACE_PREFIX = "paperclip";
 var HONCHO_V3_PATH = "/v3";
 var HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
 var DEFAULT_MAX_WORKSPACE_FILE_BYTES = 64 * 1024;
+var DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1e3;
+var DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 750;
 var EXPORT_NAMES = {
   settingsPage: "HonchoSettingsPage",
   issueTab: "HonchoIssueMemoryTab",
@@ -25,8 +27,8 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  repairMappings: "repair-mappings",
-  resyncIssue: "resync-issue"
+  resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company"
 };
 var JOB_KEYS = {
   initializeMemory: "initialize-memory",
@@ -177,6 +179,18 @@ var statStyle = {
   ...cardStyle,
   gap: "0.35rem",
   padding: "0.85rem"
+};
+var migrationListStyle = {
+  display: "grid",
+  gap: "0.6rem"
+};
+var migrationRowStyle = {
+  display: "grid",
+  gap: "0.2rem",
+  padding: "0.75rem 0.85rem",
+  borderRadius: "12px",
+  background: "rgba(15, 23, 42, 0.04)",
+  border: "1px solid rgba(15, 23, 42, 0.08)"
 };
 function hostFetchJson(path, init) {
   return fetch(path, {
@@ -377,6 +391,22 @@ function StatusPill({ label, tone = "neutral" }) {
     background: palette.bg,
     color: palette.fg
   }, children: label });
+}
+function formatMigrationCount(value, singular, plural) {
+  return `${value} ${value === 1 ? singular : plural}`;
+}
+function MigrationIssueList({ issues }) {
+  if (issues.length === 0) {
+    return /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: "No issue-backed migration sources found yet." });
+  }
+  return /* @__PURE__ */ jsx("div", { style: migrationListStyle, children: issues.map((issue) => /* @__PURE__ */ jsxs("div", { style: migrationRowStyle, children: [
+    /* @__PURE__ */ jsxs("div", { style: { display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx("div", { style: { fontWeight: 600 }, children: issue.issueIdentifier ?? issue.issueId }),
+      /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.9rem" }, children: formatMigrationCount(issue.estimatedMessages, "message", "messages") })
+    ] }),
+    issue.issueTitle ? /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.92rem" }, children: issue.issueTitle }) : null,
+    /* @__PURE__ */ jsx("div", { style: { color: "#475569", fontSize: "0.88rem" }, children: `${formatMigrationCount(issue.commentCount, "comment", "comments")} \u2022 ${formatMigrationCount(issue.documentCount, "document", "documents")}` })
+  ] }, issue.issueId)) });
 }
 function countTone(value, good = ["complete", "connected", "active", "mapped", "created"]) {
   if (!value) return "neutral";
@@ -606,11 +636,13 @@ function HonchoSettingsPage({ context }) {
   const preview = usePluginData(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
+  const initializeMemoryForCompany = usePluginAction(ACTION_KEYS.initializeMemoryForCompany);
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
   const [isActivating, setIsActivating] = useState(false);
   const [activationStepIndex, setActivationStepIndex] = useState(null);
   const [activationStepLabel, setActivationStepLabel] = useState(null);
+  const lastPersistedConfigRef = useRef(null);
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
   const deploymentMode = getDeploymentMode(settings.configJson);
@@ -621,6 +653,34 @@ function HonchoSettingsPage({ context }) {
     preview.refresh();
     jobStatus.refresh();
   }
+  function markConfigPersisted(config) {
+    lastPersistedConfigRef.current = JSON.stringify(config);
+  }
+  useEffect(() => {
+    if (settings.loading) return;
+    const serializedConfig = JSON.stringify(settings.configJson);
+    if (lastPersistedConfigRef.current == null) {
+      lastPersistedConfigRef.current = serializedConfig;
+      return;
+    }
+    if (serializedConfig === lastPersistedConfigRef.current || settings.saving || isActivating) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          validateSettingsBeforePersist(settings.configJson);
+          await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
+        } catch (nextError) {
+          setError(formatUnknownError(nextError));
+        }
+      })();
+    }, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isActivating, settings.configJson, settings.loading, settings.saving]);
   async function getCheckpointStatus() {
     if (!companyId) return null;
     const result = await hostFetchJson(`/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`, {
@@ -637,6 +697,7 @@ function HonchoSettingsPage({ context }) {
     setNotice(null);
     try {
       await settings.save(settings.configJson);
+      markConfigPersisted(settings.configJson);
       memoryStatus.refresh();
       setNotice("Settings saved.");
     } catch (nextError) {
@@ -653,8 +714,14 @@ function HonchoSettingsPage({ context }) {
     }
   }
   async function triggerJob(jobKey) {
+    if (jobKey === JOB_KEYS.initializeMemory) {
+      if (!companyId) {
+        throw new Error("companyId is required");
+      }
+      await initializeMemoryForCompany({ companyId });
+    }
     await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + 5 * 6e4;
+    const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
       if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
@@ -676,6 +743,7 @@ function HonchoSettingsPage({ context }) {
         run: async () => {
           await validateCurrentSettings();
           await settings.save(settings.configJson);
+          markConfigPersisted(settings.configJson);
         }
       },
       {
@@ -771,7 +839,11 @@ function HonchoSettingsPage({ context }) {
       /* @__PURE__ */ jsx(Row, { label: "Issue documents", value: preview.data?.totals.documents ?? 0 }),
       /* @__PURE__ */ jsx(Row, { label: "Legacy files", value: preview.data?.totals && typeof preview.data.totals.files === "number" ? preview.data.totals.files : 0 }),
       /* @__PURE__ */ jsx(Row, { label: "Estimated messages", value: preview.data?.estimatedMessages ?? 0 }),
-      /* @__PURE__ */ jsx(Row, { label: "Warnings", value: preview.data?.warnings?.join("; ") || "None" })
+      /* @__PURE__ */ jsx(Row, { label: "Warnings", value: preview.data?.warnings?.join("; ") || "None" }),
+      /* @__PURE__ */ jsxs("div", { style: { display: "grid", gap: "0.5rem" }, children: [
+        /* @__PURE__ */ jsx("div", { style: { fontSize: "0.92rem", fontWeight: 600 }, children: "Migration mapping" }),
+        /* @__PURE__ */ jsx(MigrationIssueList, { issues: preview.data?.issues ?? [] })
+      ] })
     ] }),
     /* @__PURE__ */ jsxs("div", { style: cardStyle, children: [
       /* @__PURE__ */ jsx("div", { style: { fontSize: "1rem", fontWeight: 600 }, children: "Activation" }),

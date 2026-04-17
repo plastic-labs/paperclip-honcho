@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
+import { PLUGIN_VERSION } from "../src/constants.js";
 import manifest from "../src/manifest.js";
 import plugin from "../src/worker.js";
 import { getResolvedConfig } from "../src/config.js";
+import { workspaceIdForCompany } from "../src/ids.js";
 import { BASE_CONFIG, createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
+
 describe("honcho config", () => {
+  it("uses the shared plugin version constant in the manifest", () => {
+    expect(manifest.version).toBe(PLUGIN_VERSION);
+  });
+
   it("declares the settings page and issue memory tab using the current plugin framework slots", () => {
     expect(manifest.capabilities).toEqual(expect.arrayContaining([
       "instance.settings.register",
@@ -155,7 +163,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "paperclip_co_1",
+      workspaceId: companyWorkspaceId,
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
@@ -176,7 +184,7 @@ describe("honcho config", () => {
     const result = await harness.performAction("test-connection");
     expect(result).toMatchObject({
       ok: true,
-      workspaceId: "paperclip_co_1",
+      workspaceId: companyWorkspaceId,
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];

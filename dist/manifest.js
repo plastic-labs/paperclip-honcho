@@ -1,8 +1,10 @@
 // src/constants.ts
+var PLUGIN_VERSION = "0.1.2";
 var DEFAULT_WORKSPACE_PREFIX = "paperclip";
 var HONCHO_V3_PATH = "/v3";
 var HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
 var DEFAULT_MAX_WORKSPACE_FILE_BYTES = 64 * 1024;
+var DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1e3;
 var SLOT_IDS = {
   settingsPage: "honcho-settings-page",
   issueTab: "honcho-issue-memory-tab"
@@ -21,8 +23,8 @@ var DATA_KEYS = {
 var ACTION_KEYS = {
   testConnection: "test-connection",
   probePromptContext: "probe-prompt-context",
-  repairMappings: "repair-mappings",
-  resyncIssue: "resync-issue"
+  resyncIssue: "resync-issue",
+  initializeMemoryForCompany: "initialize-memory-for-company"
 };
 var JOB_KEYS = {
   initializeMemory: "initialize-memory",
@@ -72,7 +74,6 @@ var DEFAULT_CONFIG = {
 
 // src/manifest.ts
 var PLUGIN_ID = "honcho-ai.paperclip-honcho";
-var PLUGIN_VERSION = "0.1.1";
 var manifest = {
   id: PLUGIN_ID,
   apiVersion: 1,

@@ -2,6 +2,7 @@ import type { PluginContext } from "@paperclipai/plugin-sdk";
 import {
   COMPANY_CHECKPOINT_STATE_KEY,
   COMPANY_STATUS_STATE_KEY,
+  INSTANCE_JOB_TARGETS_STATE_KEY,
   ISSUE_STATUS_STATE_KEY,
   STATE_NAMESPACE,
 } from "./constants.js";
@@ -58,6 +59,8 @@ const EMPTY_COMPANY_CHECKPOINT: CompanyMemoryCheckpoint = {
   updatedAt: null,
 };
 
+type InstanceJobTargets = Record<string, string>;
+
 function issueStateKey(issueId: string) {
   return {
     scopeKind: "issue" as const,
@@ -82,6 +85,14 @@ function companyCheckpointStateKey(companyId: string) {
     scopeId: companyId,
     namespace: STATE_NAMESPACE,
     stateKey: COMPANY_CHECKPOINT_STATE_KEY,
+  };
+}
+
+function instanceJobTargetsStateKey() {
+  return {
+    scopeKind: "instance" as const,
+    namespace: STATE_NAMESPACE,
+    stateKey: INSTANCE_JOB_TARGETS_STATE_KEY,
   };
 }
 
@@ -145,6 +156,40 @@ export async function patchCompanyCheckpoint(
   const next = { ...(await getCompanyCheckpoint(ctx, companyId)), ...patch };
   await ctx.state.set(companyCheckpointStateKey(companyId), next);
   return next;
+}
+
+async function getInstanceJobTargets(ctx: PluginContext): Promise<InstanceJobTargets> {
+  const value = await ctx.state.get(instanceJobTargetsStateKey());
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return { ...(value as InstanceJobTargets) };
+}
+
+export async function setPreparedJobCompany(ctx: PluginContext, jobKey: string, companyId: string): Promise<void> {
+  const next = {
+    ...(await getInstanceJobTargets(ctx)),
+    [jobKey]: companyId,
+  };
+  await ctx.state.set(instanceJobTargetsStateKey(), next);
+}
+
+export async function consumePreparedJobCompany(ctx: PluginContext, jobKey: string): Promise<string | null> {
+  const targets = await getInstanceJobTargets(ctx);
+  const companyId = typeof targets[jobKey] === "string" && targets[jobKey].trim().length > 0
+    ? targets[jobKey]
+    : null;
+  if (!companyId) {
+    return null;
+  }
+  const next = { ...targets };
+  delete next[jobKey];
+  if (Object.keys(next).length === 0) {
+    await ctx.state.delete(instanceJobTargetsStateKey());
+  } else {
+    await ctx.state.set(instanceJobTargetsStateKey(), next);
+  }
+  return companyId;
 }
 
 export function buildSyncErrorSummary(input: {

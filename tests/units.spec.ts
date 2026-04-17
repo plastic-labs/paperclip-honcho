@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Issue, IssueComment } from "@paperclipai/plugin-sdk";
-import { issueEntityUrl, peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "../src/ids.js";
+import { hashId, issueEntityUrl, peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "../src/ids.js";
+import { buildWorkspaceId } from "../src/entities.js";
 import {
   actorFromComment,
   actorFromDocumentRevision,
@@ -17,6 +18,32 @@ describe("honcho units", () => {
     expect(sessionIdForIssue("iss_1", "PAP-1")).toBe("PAP-1");
     expect(peerIdForAgent("agent_1")).toBe("agent_agent_1");
     expect(peerIdForUser("user_1")).toBe("user_user_1");
+  });
+
+  it("keeps workspace ids readable while avoiding collisions for duplicate company names", () => {
+    const first = workspaceIdForCompany("co_1", "paperclip", "Acme");
+    const second = workspaceIdForCompany("co_2", "paperclip", "Acme");
+
+    expect(first).toMatch(/^Acme_/);
+    expect(second).toMatch(/^Acme_/);
+    expect(first).not.toBe(second);
+  });
+
+  it("buildWorkspaceId matches the canonical workspace id shape for named companies", () => {
+    expect(buildWorkspaceId("co_1", "paperclip", "Acme")).toBe(workspaceIdForCompany("co_1", "paperclip", "Acme"));
+  });
+
+  it("keeps agent peer ids readable while avoiding collisions for duplicate agent names", () => {
+    const first = peerIdForAgent("agent_1", "Support Bot");
+    const second = peerIdForAgent("agent_2", "Support Bot");
+
+    expect(first).toMatch(/^agent_Support_Bot_/);
+    expect(second).toMatch(/^agent_Support_Bot_/);
+    expect(first).not.toBe(second);
+  });
+
+  it("uses a strong deterministic digest for stable id hashing", () => {
+    expect(hashId("agent_1")).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("builds stable issue entity URLs", () => {

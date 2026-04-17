@@ -112,6 +112,14 @@ export type MigrationPreview = {
     documents: number;
     files: number;
   };
+  issues: Array<{
+    issueId: string;
+    issueIdentifier: string | null;
+    issueTitle: string | null;
+    commentCount: number;
+    documentCount: number;
+    estimatedMessages: number;
+  }>;
   estimatedMessages: number;
   warnings: string[];
   generatedAt: string;
