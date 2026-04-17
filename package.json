@@ -43,7 +43,7 @@
   "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
-    "@paperclipai/plugin-sdk": "^2026.325.0"
+    "@paperclipai/plugin-sdk": "^2026.416.0"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",
