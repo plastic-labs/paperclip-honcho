@@ -38,10 +38,7 @@ export function peerIdForAgent(agentId: string, agentName?: string | null): stri
   return joinHonchoId(["agent", agentId]);
 }
 
-export function peerIdForUser(userId: string, userName?: string | null): string {
-  if (typeof userName === "string" && userName.trim()) {
-    return joinHonchoId(["user", userName, shortStableSuffix(userId)]);
-  }
+export function peerIdForUser(userId: string): string {
   return joinHonchoId(["user", userId]);
 }
 

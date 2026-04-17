@@ -7452,10 +7452,7 @@ function peerIdForAgent(agentId, agentName) {
   }
   return joinHonchoId(["agent", agentId]);
 }
-function peerIdForUser(userId, userName) {
-  if (typeof userName === "string" && userName.trim()) {
-    return joinHonchoId(["user", userName, shortStableSuffix(userId)]);
-  }
+function peerIdForUser(userId) {
   return joinHonchoId(["user", userId]);
 }
 function sessionIdForIssue(issueId, issueIdentifier) {

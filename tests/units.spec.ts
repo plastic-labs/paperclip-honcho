@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Issue, IssueComment } from "@paperclipai/plugin-sdk";
 import { hashId, issueEntityUrl, peerIdForAgent, peerIdForUser, sessionIdForIssue, workspaceIdForCompany } from "../src/ids.js";
+import { buildWorkspaceId } from "../src/entities.js";
 import {
   actorFromComment,
   actorFromDocumentRevision,
@@ -26,6 +27,10 @@ describe("honcho units", () => {
     expect(first).toMatch(/^Acme_/);
     expect(second).toMatch(/^Acme_/);
     expect(first).not.toBe(second);
+  });
+
+  it("buildWorkspaceId matches the canonical workspace id shape for named companies", () => {
+    expect(buildWorkspaceId("co_1", "paperclip", "Acme")).toBe(workspaceIdForCompany("co_1", "paperclip", "Acme"));
   });
 
   it("keeps agent peer ids readable while avoiding collisions for duplicate agent names", () => {

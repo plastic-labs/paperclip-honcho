@@ -450,8 +450,8 @@ export async function listJobsForUi(ctx: PluginContext) {
   }));
 }
 
-export function buildWorkspaceId(companyId: string, workspacePrefix: string) {
-  return workspaceIdForCompany(companyId, workspacePrefix);
+export function buildWorkspaceId(companyId: string, workspacePrefix: string, companyName?: string | null) {
+  return workspaceIdForCompany(companyId, workspacePrefix, companyName);
 }
 
 export function buildMigrationReportPayload(companyId: string, preview: MigrationPreview) {
