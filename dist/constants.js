@@ -115,6 +115,7 @@ var RUNTIME_LAUNCHERS = [
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
   honchoApiKey: "",
+  allowUnsafePrivateNetwork: false,
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,

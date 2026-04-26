@@ -74,6 +74,7 @@ describe("honcho config", () => {
 
     expect(resolved.honchoApiBaseUrl).toBe("https://api.honcho.dev/");
     expect(resolved.honchoApiKey).toBe("HONCHO_API_KEY");
+    expect(resolved.allowUnsafePrivateNetwork).toBe(false);
     expect(resolved.workspacePrefix).toBe(BASE_CONFIG.workspacePrefix);
     expect(resolved.syncIssueComments).toBe(true);
     expect(resolved.syncIssueDocuments).toBe(true);
@@ -189,6 +190,45 @@ describe("honcho config", () => {
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.headers.authorization).toBe("Bearer resolved:HONCHO_API_KEY");
+  });
+
+  it("allows private-network self-hosted fallback when unsafe mode is enabled", async () => {
+    const directFetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", directFetch);
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "https://honcho.jaclab.net",
+        allowUnsafePrivateNetwork: true,
+      },
+    });
+    harness.ctx.http.fetch = vi.fn(async () => {
+      throw new Error("All resolved IPs for honcho.jaclab.net are in private/reserved ranges");
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    await expect(harness.performAction("test-connection")).resolves.toMatchObject({
+      ok: true,
+      workspaceId: companyWorkspaceId,
+    });
+    expect(directFetch).toHaveBeenCalled();
+  });
+
+  it("keeps private-network safety enabled by default", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("All resolved IPs for honcho.jaclab.net are in private/reserved ranges");
+    }));
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "https://honcho.jaclab.net",
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    await expect(harness.performAction("test-connection")).rejects.toThrow(
+      "All resolved IPs for honcho.jaclab.net are in private/reserved ranges",
+    );
   });
 
   it("accepts legacy config aliases while resolving to the renamed public keys", async () => {

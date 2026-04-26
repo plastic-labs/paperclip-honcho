@@ -59,6 +59,7 @@ var RUNTIME_LAUNCHERS = [
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
   honchoApiKey: "",
+  allowUnsafePrivateNetwork: false,
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
@@ -114,6 +115,12 @@ var manifest = {
         title: "Honcho API Key",
         format: "secret-ref",
         default: DEFAULT_CONFIG.honchoApiKey
+      },
+      allowUnsafePrivateNetwork: {
+        type: "boolean",
+        title: "Allow Unsafe Private Network",
+        description: "Retry private/reserved host lookups using direct fetch (unsafe).",
+        default: DEFAULT_CONFIG.allowUnsafePrivateNetwork
       },
       workspacePrefix: {
         type: "string",

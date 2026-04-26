@@ -11,6 +11,7 @@ export type HonchoPluginConfig = {
   honchoApiBaseUrl?: string;
   honchoApiKey?: string;
   honchoApiKeySecretRef?: string;
+  allowUnsafePrivateNetwork?: boolean;
   workspacePrefix?: string;
   syncIssueComments?: boolean;
   syncIssueDocuments?: boolean;
@@ -30,6 +31,7 @@ export type HonchoPluginConfig = {
 export type HonchoResolvedConfig = {
   honchoApiBaseUrl: string;
   honchoApiKey: string;
+  allowUnsafePrivateNetwork: boolean;
   workspacePrefix: string;
   syncIssueComments: boolean;
   syncIssueDocuments: boolean;
@@ -312,6 +314,7 @@ export type MemoryStatusData = {
   config: {
     honchoApiBaseUrl: string;
     honchoApiKey: string;
+    allowUnsafePrivateNetwork: boolean;
     workspacePrefix: string;
     syncIssueComments: boolean;
     syncIssueDocuments: boolean;

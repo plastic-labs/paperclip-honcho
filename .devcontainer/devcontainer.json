@@ -1,0 +1,30 @@
+{
+  "name": "paperclip-honcho",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bookworm",
+  "remoteUser": "node",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "typescript.tsdk": "node_modules/typescript/lib"
+      }
+    }
+  },
+  "postCreateCommand": "corepack enable && corepack prepare pnpm@latest --activate && pnpm install",
+  "postStartCommand": "pnpm --version && node --version",
+  "forwardPorts": [
+    4178
+  ],
+  "portsAttributes": {
+    "4178": {
+      "label": "Paperclip Plugin UI Dev Server",
+      "onAutoForward": "notify"
+    }
+  }
+}

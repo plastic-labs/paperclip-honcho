@@ -61,6 +61,12 @@ function joinUrl(baseUrl: string, pathname: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${pathname}`;
 }
 
+function isPrivateRangeBlockedError(error: unknown): boolean {
+  return error instanceof Error
+    && typeof error.message === "string"
+    && /All resolved IPs for\s+[^\s]+\s+are in private\/reserved ranges/i.test(error.message);
+}
+
 function buildIssueContextPreview(payload: HonchoSessionContextResult): string | null {
   const candidates: string[] = [];
   const summaryText = typeof payload.summary === "string"
@@ -124,13 +130,29 @@ async function requestJson(
     if (apiKey) {
       headers.authorization = `Bearer ${apiKey}`;
     }
-    const res = await ctx.http.fetch(joinUrl(config.honchoApiBaseUrl, pathname), {
-      ...init,
-      headers: {
-        ...headers,
-        ...(init.headers ?? {}),
-      },
-    });
+    const requestUrl = joinUrl(config.honchoApiBaseUrl, pathname);
+    let res: Response | null = null;
+    try {
+      res = await ctx.http.fetch(requestUrl, {
+        ...init,
+        headers: {
+          ...headers,
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (error) {
+      if (config.allowUnsafePrivateNetwork && isPrivateRangeBlockedError(error)) {
+        res = await fetch(requestUrl, {
+          ...init,
+          headers: {
+            ...headers,
+            ...(init.headers ?? {}),
+          },
+        });
+      } else {
+        throw error;
+      }
+    }
     if (!res) {
       if (attempt < RATE_LIMIT_MAX_RETRIES) {
         await sleep(RATE_LIMIT_BASE_DELAY_MS * Math.pow(2, attempt));

@@ -13,6 +13,7 @@ import type { DocumentRevision } from "../src/types.js";
 export const BASE_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
   honchoApiKey: "HONCHO_API_KEY",
+  allowUnsafePrivateNetwork: false,
   workspacePrefix: "paperclip",
   syncIssueComments: true,
   syncIssueDocuments: true,

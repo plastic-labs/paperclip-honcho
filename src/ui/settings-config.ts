@@ -16,6 +16,9 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
       : typeof source.honchoApiKeySecretRef === "string"
         ? source.honchoApiKeySecretRef.trim()
         : DEFAULT_CONFIG.honchoApiKey,
+    allowUnsafePrivateNetwork: typeof source.allowUnsafePrivateNetwork === "boolean"
+      ? source.allowUnsafePrivateNetwork
+      : DEFAULT_CONFIG.allowUnsafePrivateNetwork,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
     syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
