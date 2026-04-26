@@ -1,5 +1,5 @@
 {
-  "name": "@icexpr/paperclip-honcho",
+  "name": "@honcho-ai/paperclip-honcho",
   "version": "0.1.2",
   "type": "module",
   "description": "Honcho memory integration for Paperclip",
