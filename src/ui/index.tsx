@@ -5,14 +5,27 @@ import {
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
+import {
+  ACTION_KEYS,
+  DATA_KEYS,
+  DEFAULT_CONFIG,
+  DEFAULT_JOB_WAIT_TIMEOUT_MS,
+  DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS,
+  JOB_KEYS,
+  PLUGIN_ID,
+} from "../constants.js";
 import type {
   IssueMemoryStatusData,
   MemoryStatusData,
   MigrationJobStatusData,
   MigrationPreview,
 } from "../types.js";
-import { getDeploymentMode, normalizeSettingsConfig, type HonchoDeploymentMode, type SettingsConfig } from "./settings-config.js";
+import {
+  getDeploymentMode,
+  normalizeSettingsConfig,
+  type HonchoDeploymentMode,
+  type SettingsConfig,
+} from "./settings-config.js";
 
 const sectionStyle: React.CSSProperties = {
   display: "grid",
@@ -31,7 +44,8 @@ const cardStyle: React.CSSProperties = {
 
 const heroStyle: React.CSSProperties = {
   ...cardStyle,
-  background: "linear-gradient(135deg, rgba(14, 116, 144, 0.09), rgba(15, 23, 42, 0.03))",
+  background:
+    "linear-gradient(135deg, rgba(14, 116, 144, 0.09), rgba(15, 23, 42, 0.03))",
 };
 
 const buttonStyle: React.CSSProperties = {
@@ -155,7 +169,7 @@ function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
       const text = await response.text();
       throw new Error(text || `Request failed: ${response.status}`);
     }
-    return await response.json() as T;
+    return (await response.json()) as T;
   });
 }
 
@@ -176,8 +190,13 @@ function formatUnknownError(nextError: unknown): string {
 }
 
 function validateSettingsBeforePersist(config: SettingsConfig) {
-  if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
-    throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
+  if (
+    getDeploymentMode(config) === "self-hosted" &&
+    !config.honchoApiBaseUrl.trim()
+  ) {
+    throw new Error(
+      "Honcho API base URL is required for self-hosted or local deployments.",
+    );
   }
 }
 
@@ -188,7 +207,9 @@ function sleep(ms: number) {
 }
 
 function useSettingsConfig() {
-  const [configJson, setConfigJson] = useState<SettingsConfig>({ ...DEFAULT_CONFIG });
+  const [configJson, setConfigJson] = useState<SettingsConfig>({
+    ...DEFAULT_CONFIG,
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +217,9 @@ function useSettingsConfig() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    hostFetchJson<{ configJson?: Record<string, unknown> | null } | null>(`/api/plugins/${PLUGIN_ID}/config`)
+    hostFetchJson<{ configJson?: Record<string, unknown> | null } | null>(
+      `/api/plugins/${PLUGIN_ID}/config`,
+    )
       .then((result) => {
         if (cancelled) return;
         setConfigJson(normalizeSettingsConfig(result?.configJson));
@@ -234,10 +257,13 @@ function useSettingsConfig() {
   }
 
   async function test(nextConfig: SettingsConfig) {
-    return await hostFetchJson<{ valid: boolean; message?: string }>(`/api/plugins/${PLUGIN_ID}/config/test`, {
-      method: "POST",
-      body: JSON.stringify({ configJson: nextConfig }),
-    });
+    return await hostFetchJson<{ valid: boolean; message?: string }>(
+      `/api/plugins/${PLUGIN_ID}/config/test`,
+      {
+        method: "POST",
+        body: JSON.stringify({ configJson: nextConfig }),
+      },
+    );
   }
 
   return {
@@ -261,7 +287,9 @@ function useCompanySecrets(companyId: string | null | undefined) {
     if (!companyId) return;
     setLoading(true);
     try {
-      const result = await hostFetchJson<CompanySecretRecord[]>(`/api/companies/${companyId}/secrets`);
+      const result = await hostFetchJson<CompanySecretRecord[]>(
+        `/api/companies/${companyId}/secrets`,
+      );
       setSecrets(result);
       setError(null);
     } catch (nextError) {
@@ -275,14 +303,21 @@ function useCompanySecrets(companyId: string | null | undefined) {
     void refresh();
   }, [companyId]);
 
-  async function createSecret(input: { name: string; value: string; description?: string | null }) {
+  async function createSecret(input: {
+    name: string;
+    value: string;
+    description?: string | null;
+  }) {
     if (!companyId) throw new Error("companyId is required");
     setCreating(true);
     try {
-      const created = await hostFetchJson<CompanySecretRecord>(`/api/companies/${companyId}/secrets`, {
-        method: "POST",
-        body: JSON.stringify(input),
-      });
+      const created = await hostFetchJson<CompanySecretRecord>(
+        `/api/companies/${companyId}/secrets`,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
+        },
+      );
       await refresh();
       return created;
     } finally {
@@ -301,7 +336,9 @@ function usePluginJobs() {
   const refresh = async () => {
     setLoading(true);
     try {
-      const result = await hostFetchJson<PluginJobRecord[]>(`/api/plugins/${PLUGIN_ID}/jobs`);
+      const result = await hostFetchJson<PluginJobRecord[]>(
+        `/api/plugins/${PLUGIN_ID}/jobs`,
+      );
       setJobs(result);
       setError(null);
     } catch (nextError) {
@@ -322,10 +359,13 @@ function usePluginJobs() {
     }
     const resolved = jobs.find((entry) => entry.jobKey === jobKey);
     if (!resolved) throw new Error(`Job not found: ${jobKey}`);
-    await hostFetchJson(`/api/plugins/${PLUGIN_ID}/jobs/${resolved.id}/trigger`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
+    await hostFetchJson(
+      `/api/plugins/${PLUGIN_ID}/jobs/${resolved.id}/trigger`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
     await refresh();
   }
 
@@ -346,54 +386,116 @@ function useCompanies() {
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: "0.75rem", alignItems: "start" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "180px 1fr",
+        gap: "0.75rem",
+        alignItems: "start",
+      }}
+    >
       <div style={{ fontSize: "0.85rem", color: "#475569" }}>{label}</div>
       <div style={{ fontSize: "0.92rem" }}>{value}</div>
     </div>
   );
 }
 
-function StatusPill({ label, tone = "neutral" }: { label: string; tone?: "neutral" | "good" | "warn" | "bad" }) {
+function StatusPill({
+  label,
+  tone = "neutral",
+}: {
+  label: string;
+  tone?: "neutral" | "good" | "warn" | "bad";
+}) {
   const palette = {
-    neutral: { bg: "rgba(255,255,255,0.8)", fg: "#0f172a", border: "rgba(15,23,42,0.1)" },
-    good: { bg: "rgba(16,185,129,0.12)", fg: "#047857", border: "rgba(16,185,129,0.25)" },
-    warn: { bg: "rgba(245,158,11,0.12)", fg: "#b45309", border: "rgba(245,158,11,0.25)" },
-    bad: { bg: "rgba(239,68,68,0.12)", fg: "#b91c1c", border: "rgba(239,68,68,0.25)" },
+    neutral: {
+      bg: "rgba(255,255,255,0.8)",
+      fg: "#0f172a",
+      border: "rgba(15,23,42,0.1)",
+    },
+    good: {
+      bg: "rgba(16,185,129,0.12)",
+      fg: "#047857",
+      border: "rgba(16,185,129,0.25)",
+    },
+    warn: {
+      bg: "rgba(245,158,11,0.12)",
+      fg: "#b45309",
+      border: "rgba(245,158,11,0.25)",
+    },
+    bad: {
+      bg: "rgba(239,68,68,0.12)",
+      fg: "#b91c1c",
+      border: "rgba(239,68,68,0.25)",
+    },
   }[tone];
   return (
-    <span style={{
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "0.4rem",
-      borderRadius: "999px",
-      padding: "0.25rem 0.65rem",
-      fontSize: "0.82rem",
-      border: `1px solid ${palette.border}`,
-      background: palette.bg,
-      color: palette.fg,
-    }}>
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.4rem",
+        borderRadius: "999px",
+        padding: "0.25rem 0.65rem",
+        fontSize: "0.82rem",
+        border: `1px solid ${palette.border}`,
+        background: palette.bg,
+        color: palette.fg,
+      }}
+    >
       {label}
     </span>
   );
 }
 
-function formatMigrationCount(value: number, singular: string, plural: string): string {
+function formatMigrationCount(
+  value: number,
+  singular: string,
+  plural: string,
+): string {
   return `${value} ${value === 1 ? singular : plural}`;
 }
 
-function MigrationIssueList({ issues }: { issues: MigrationPreview["issues"] }) {
+function MigrationIssueList({
+  issues,
+}: {
+  issues: MigrationPreview["issues"];
+}) {
   if (issues.length === 0) {
-    return <div style={{ color: "#475569", fontSize: "0.9rem" }}>No issue-backed migration sources found yet.</div>;
+    return (
+      <div style={{ color: "#475569", fontSize: "0.9rem" }}>
+        No issue-backed migration sources found yet.
+      </div>
+    );
   }
   return (
     <div style={migrationListStyle}>
       {issues.map((issue) => (
         <div key={issue.issueId} style={migrationRowStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-            <div style={{ fontWeight: 600 }}>{issue.issueIdentifier ?? issue.issueId}</div>
-            <div style={{ color: "#475569", fontSize: "0.9rem" }}>{formatMigrationCount(issue.estimatedMessages, "message", "messages")}</div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ fontWeight: 600 }}>
+              {issue.issueIdentifier ?? issue.issueId}
+            </div>
+            <div style={{ color: "#475569", fontSize: "0.9rem" }}>
+              {formatMigrationCount(
+                issue.estimatedMessages,
+                "message",
+                "messages",
+              )}
+            </div>
           </div>
-          {issue.issueTitle ? <div style={{ color: "#475569", fontSize: "0.92rem" }}>{issue.issueTitle}</div> : null}
+          {issue.issueTitle ? (
+            <div style={{ color: "#475569", fontSize: "0.92rem" }}>
+              {issue.issueTitle}
+            </div>
+          ) : null}
           <div style={{ color: "#475569", fontSize: "0.88rem" }}>
             {`${formatMigrationCount(issue.commentCount, "comment", "comments")} • ${formatMigrationCount(issue.documentCount, "document", "documents")}`}
           </div>
@@ -403,11 +505,15 @@ function MigrationIssueList({ issues }: { issues: MigrationPreview["issues"] }) 
   );
 }
 
-function countTone(value: string | null | undefined, good: string[] = ["complete", "connected", "active", "mapped", "created"]) {
+function countTone(
+  value: string | null | undefined,
+  good: string[] = ["complete", "connected", "active", "mapped", "created"],
+) {
   if (!value) return "neutral" as const;
   if (good.includes(value)) return "good" as const;
   if (value.includes("fail") || value === "degraded") return "bad" as const;
-  if (value === "partial" || value === "preview_ready" || value === "running") return "warn" as const;
+  if (value === "partial" || value === "preview_ready" || value === "running")
+    return "warn" as const;
   return "neutral" as const;
 }
 
@@ -416,7 +522,8 @@ function SecretSection(props: {
   config: SettingsConfig;
   onConfigChange(next: Partial<SettingsConfig>): void;
 }) {
-  const { secrets, refresh, createSecret, loading, creating, error } = useCompanySecrets(props.companyId);
+  const { secrets, refresh, createSecret, loading, creating, error } =
+    useCompanySecrets(props.companyId);
   const deploymentMode = getDeploymentMode(props.config);
   const [draftOpen, setDraftOpen] = useState(false);
   const [customBaseUrlDraft, setCustomBaseUrlDraft] = useState(
@@ -436,11 +543,16 @@ function SecretSection(props: {
 
   function updateDeploymentMode(nextMode: HonchoDeploymentMode) {
     if (nextMode === "cloud") {
-      props.onConfigChange({ honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl });
+      props.onConfigChange({
+        honchoApiBaseUrl: DEFAULT_CONFIG.honchoApiBaseUrl,
+      });
       return;
     }
 
-    const nextBaseUrl = deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : customBaseUrlDraft;
+    const nextBaseUrl =
+      deploymentMode === "self-hosted"
+        ? props.config.honchoApiBaseUrl
+        : customBaseUrlDraft;
     props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
   }
 
@@ -449,14 +561,17 @@ function SecretSection(props: {
       <div>
         <div style={{ fontSize: "1rem", fontWeight: 600 }}>Connect Honcho</div>
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          Choose Honcho Cloud or a self-hosted/local deployment, then create or select a Paperclip secret that holds the Honcho API key.
+          Choose Honcho Cloud or a self-hosted/local deployment, then create or
+          select a Paperclip secret that holds the Honcho API key.
         </div>
       </div>
       <label style={labelStyle}>
         <span style={labelHeaderStyle}>Deployment</span>
         <select
           value={deploymentMode}
-          onChange={(event) => updateDeploymentMode(event.target.value as HonchoDeploymentMode)}
+          onChange={(event) =>
+            updateDeploymentMode(event.target.value as HonchoDeploymentMode)
+          }
           style={selectStyle}
         >
           <option value="cloud">Honcho Cloud</option>
@@ -465,33 +580,58 @@ function SecretSection(props: {
       </label>
       {deploymentMode === "cloud" ? (
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          Using the default Honcho Cloud base URL: `{DEFAULT_CONFIG.honchoApiBaseUrl}`
+          Using the default Honcho Cloud base URL: `
+          {DEFAULT_CONFIG.honchoApiBaseUrl}`
         </div>
       ) : (
-        <label style={labelStyle}>
-          <span style={labelHeaderStyle}>Honcho API base URL</span>
-          <input
-            value={props.config.honchoApiBaseUrl}
-            onChange={(event) => {
-              const nextBaseUrl = event.target.value;
-              setCustomBaseUrlDraft(nextBaseUrl);
-              props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
-            }}
-            style={inputStyle}
-          />
-          <span style={{ color: "#475569", fontSize: "0.82rem" }}>
-            This URL must be reachable from the Paperclip host runtime. If Paperclip runs in Docker, `localhost` may not point at your machine.
-          </span>
-        </label>
+        <>
+          <label style={labelStyle}>
+            <span style={labelHeaderStyle}>Honcho API base URL</span>
+            <input
+              value={props.config.honchoApiBaseUrl}
+              onChange={(event) => {
+                const nextBaseUrl = event.target.value;
+                setCustomBaseUrlDraft(nextBaseUrl);
+                props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+              }}
+              style={inputStyle}
+            />
+            <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+              This URL must be reachable from the Paperclip host runtime. If
+              Paperclip runs in Docker, `localhost` may not point at your
+              machine.
+            </span>
+          </label>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}
+          >
+            <input
+              type="checkbox"
+              checked={props.config.allowUnsafePrivateNetwork}
+              onChange={(event) =>
+                props.onConfigChange({
+                  allowUnsafePrivateNetwork: event.target.checked,
+                })
+              }
+            />
+            <span>
+              Allow unsafe private-network Honcho hosts (internal/container DNS)
+            </span>
+          </label>
+        </>
       )}
       <label style={labelStyle}>
         <span style={labelHeaderStyle}>
           <span>Honcho API Key</span>
-          {deploymentMode === "self-hosted" ? <span style={optionalTagStyle}>Optional</span> : null}
+          {deploymentMode === "self-hosted" ? (
+            <span style={optionalTagStyle}>Optional</span>
+          ) : null}
         </span>
         <select
           value={props.config.honchoApiKey}
-          onChange={(event) => props.onConfigChange({ honchoApiKey: event.target.value })}
+          onChange={(event) =>
+            props.onConfigChange({ honchoApiKey: event.target.value })
+          }
           style={selectStyle}
         >
           <option value="">Select a Paperclip secret…</option>
@@ -503,10 +643,17 @@ function SecretSection(props: {
         </select>
       </label>
       <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
-        <button style={buttonStyle} onClick={() => void refresh()} disabled={loading}>
+        <button
+          style={buttonStyle}
+          onClick={() => void refresh()}
+          disabled={loading}
+        >
           Refresh secrets
         </button>
-        <button style={buttonStyle} onClick={() => setDraftOpen((value) => !value)}>
+        <button
+          style={buttonStyle}
+          onClick={() => setDraftOpen((value) => !value)}
+        >
           {draftOpen ? "Hide secret form" : "Create secret"}
         </button>
       </div>
@@ -516,7 +663,12 @@ function SecretSection(props: {
             <span>Secret name</span>
             <input
               value={draft.name}
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  name: event.target.value,
+                }))
+              }
               style={inputStyle}
             />
           </label>
@@ -525,7 +677,12 @@ function SecretSection(props: {
             <input
               type="password"
               value={draft.value}
-              onChange={(event) => setDraft((current) => ({ ...current, value: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  value: event.target.value,
+                }))
+              }
               style={inputStyle}
             />
           </label>
@@ -533,7 +690,12 @@ function SecretSection(props: {
             <span>Description</span>
             <input
               value={draft.description}
-              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
               style={inputStyle}
             />
           </label>
@@ -560,36 +722,64 @@ function SyncProfileSection(props: {
   config: SettingsConfig;
   onConfigChange(next: Partial<SettingsConfig>): void;
 }) {
-  const recommended = useMemo<Partial<SettingsConfig>>(() => ({
-    syncIssueComments: true,
-    syncIssueDocuments: true,
-    enablePeerChat: true,
-  }), []);
+  const recommended = useMemo<Partial<SettingsConfig>>(
+    () => ({
+      syncIssueComments: true,
+      syncIssueDocuments: true,
+      enablePeerChat: true,
+    }),
+    [],
+  );
 
   return (
     <div style={cardStyle}>
       <div>
-        <div style={{ fontSize: "1rem", fontWeight: 600 }}>Recommended sync profile</div>
+        <div style={{ fontSize: "1rem", fontWeight: 600 }}>
+          Recommended sync profile
+        </div>
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          The public-host-compatible package syncs issue comments and issue documents, then serves Honcho memory through tool-first workflows.
+          The public-host-compatible package syncs issue comments and issue
+          documents, then serves Honcho memory through tool-first workflows.
         </div>
       </div>
-      <button style={buttonStyle} onClick={() => props.onConfigChange(recommended)}>
+      <button
+        style={buttonStyle}
+        onClick={() => props.onConfigChange(recommended)}
+      >
         Apply recommended profile
       </button>
       <div style={{ display: "grid", gap: "0.55rem" }}>
         {[
-          ["Sync issue comments", props.config.syncIssueComments, "syncIssueComments"],
-          ["Sync issue documents", props.config.syncIssueDocuments, "syncIssueDocuments"],
-          ["Enable peer chat tool", props.config.enablePeerChat, "enablePeerChat"],
+          [
+            "Sync issue comments",
+            props.config.syncIssueComments,
+            "syncIssueComments",
+          ],
+          [
+            "Sync issue documents",
+            props.config.syncIssueDocuments,
+            "syncIssueDocuments",
+          ],
+          [
+            "Enable peer chat tool",
+            props.config.enablePeerChat,
+            "enablePeerChat",
+          ],
           ["observe_me", props.config.observe_me, "observe_me"],
           ["observe_others", props.config.observe_others, "observe_others"],
         ].map(([label, checked, key]) => (
-          <label key={String(key)} style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+          <label
+            key={String(key)}
+            style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}
+          >
             <input
               type="checkbox"
               checked={Boolean(checked)}
-              onChange={(event) => props.onConfigChange({ [String(key)]: event.target.checked } as Partial<SettingsConfig>)}
+              onChange={(event) =>
+                props.onConfigChange({
+                  [String(key)]: event.target.checked,
+                } as Partial<SettingsConfig>)
+              }
             />
             <span>{label}</span>
           </label>
@@ -599,7 +789,9 @@ function SyncProfileSection(props: {
         <span>Workspace prefix</span>
         <input
           value={props.config.workspacePrefix}
-          onChange={(event) => props.onConfigChange({ workspacePrefix: event.target.value })}
+          onChange={(event) =>
+            props.onConfigChange({ workspacePrefix: event.target.value })
+          }
           style={inputStyle}
         />
       </label>
@@ -613,28 +805,52 @@ function StatsGrid({ status }: { status: MemoryStatusData | null }) {
   return (
     <div style={gridStyle}>
       <div style={statStyle}>
-        <div style={{ fontSize: "0.82rem", color: "#475569" }}>Honcho connection</div>
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{companyStatus?.connectionStatus ?? "unknown"}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Honcho connection
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {companyStatus?.connectionStatus ?? "unknown"}
+        </div>
       </div>
       <div style={statStyle}>
-        <div style={{ fontSize: "0.82rem", color: "#475569" }}>Mapped peers</div>
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{status.counts.mappedPeers}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Mapped peers
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {status.counts.mappedPeers}
+        </div>
       </div>
       <div style={statStyle}>
-        <div style={{ fontSize: "0.82rem", color: "#475569" }}>Mapped sessions</div>
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{status.counts.mappedSessions}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Mapped sessions
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {status.counts.mappedSessions}
+        </div>
       </div>
       <div style={statStyle}>
-      <div style={{ fontSize: "0.82rem", color: "#475569" }}>Imported comments</div>
-      <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{status.counts.importedComments}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Imported comments
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {status.counts.importedComments}
+        </div>
       </div>
       <div style={statStyle}>
-        <div style={{ fontSize: "0.82rem", color: "#475569" }}>Imported documents</div>
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{status.counts.importedDocuments}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Imported documents
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {status.counts.importedDocuments}
+        </div>
       </div>
       <div style={statStyle}>
-        <div style={{ fontSize: "0.82rem", color: "#475569" }}>Pending failures</div>
-        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>{companyStatus?.pendingFailureCount ?? 0}</div>
+        <div style={{ fontSize: "0.82rem", color: "#475569" }}>
+          Pending failures
+        </div>
+        <div style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+          {companyStatus?.pendingFailureCount ?? 0}
+        </div>
       </div>
     </div>
   );
@@ -645,25 +861,42 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const companyId = context.companyId ?? companies[0]?.id ?? null;
   const settings = useSettingsConfig();
   const jobs = usePluginJobs();
-  const memoryStatus = usePluginData<MemoryStatusData>(DATA_KEYS.memoryStatus, companyId ? { companyId } : {});
-  const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
-  const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
+  const memoryStatus = usePluginData<MemoryStatusData>(
+    DATA_KEYS.memoryStatus,
+    companyId ? { companyId } : {},
+  );
+  const preview = usePluginData<MigrationPreview | null>(
+    DATA_KEYS.migrationPreview,
+    companyId ? { companyId } : {},
+  );
+  const jobStatus = usePluginData<MigrationJobStatusData>(
+    DATA_KEYS.migrationJobStatus,
+    companyId ? { companyId } : {},
+  );
   const testConnection = usePluginAction(ACTION_KEYS.testConnection);
-  const initializeMemoryForCompany = usePluginAction(ACTION_KEYS.initializeMemoryForCompany);
+  const initializeMemoryForCompany = usePluginAction(
+    ACTION_KEYS.initializeMemoryForCompany,
+  );
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isActivating, setIsActivating] = useState(false);
-  const [activationStepIndex, setActivationStepIndex] = useState<number | null>(null);
-  const [activationStepLabel, setActivationStepLabel] = useState<string | null>(null);
+  const [activationStepIndex, setActivationStepIndex] = useState<number | null>(
+    null,
+  );
+  const [activationStepLabel, setActivationStepLabel] = useState<string | null>(
+    null,
+  );
   const lastPersistedConfigRef = useRef<string | null>(null);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
   const deploymentMode = getDeploymentMode(settings.configJson);
-  const canRunConnectionActions = deploymentMode === "cloud"
-    ? Boolean(companyId && settings.configJson.honchoApiKey)
-    : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
-  const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
+  const canRunConnectionActions =
+    deploymentMode === "cloud"
+      ? Boolean(companyId && settings.configJson.honchoApiKey)
+      : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
+  const actionButtonsDisabled =
+    settings.loading || settings.saving || jobs.loading || isActivating;
 
   function refreshActivationData() {
     memoryStatus.refresh();
@@ -683,7 +916,11 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
       lastPersistedConfigRef.current = serializedConfig;
       return;
     }
-    if (serializedConfig === lastPersistedConfigRef.current || settings.saving || isActivating) {
+    if (
+      serializedConfig === lastPersistedConfigRef.current ||
+      settings.saving ||
+      isActivating
+    ) {
       return;
     }
 
@@ -706,13 +943,16 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
 
   async function getCheckpointStatus() {
     if (!companyId) return null;
-    const result = await hostFetchJson<{ data: MigrationJobStatusData }>(`/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`, {
-      method: "POST",
-      body: JSON.stringify({
-        companyId,
-        params: { companyId },
-      }),
-    });
+    const result = await hostFetchJson<{ data: MigrationJobStatusData }>(
+      `/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          companyId,
+          params: { companyId },
+        }),
+      },
+    );
     return result.data.checkpoint;
   }
 
@@ -750,10 +990,16 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
     while (Date.now() < timeoutAt) {
       const checkpoint = await getCheckpointStatus();
-      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
+      if (
+        checkpoint?.activeJobKey === jobKey &&
+        checkpoint.status === "failed"
+      ) {
         throw new Error(checkpoint.lastError ?? `Job failed: ${jobKey}`);
       }
-      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "complete") {
+      if (
+        checkpoint?.activeJobKey === jobKey &&
+        checkpoint.status === "complete"
+      ) {
         refreshActivationData();
         return;
       }
@@ -799,7 +1045,9 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         try {
           await step.run();
         } catch (nextError) {
-          throw new Error(`Activation failed during ${step.errorLabel}: ${formatUnknownError(nextError)}`);
+          throw new Error(
+            `Activation failed during ${step.errorLabel}: ${formatUnknownError(nextError)}`,
+          );
         }
       }
       refreshActivationData();
@@ -818,42 +1066,84 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     <div style={sectionStyle}>
       <div style={heroStyle}>
         <div style={{ display: "grid", gap: "0.4rem" }}>
-          <div style={{ fontSize: "1.35rem", fontWeight: 700 }}>Honcho Memory Activation</div>
+          <div style={{ fontSize: "1.35rem", fontWeight: 700 }}>
+            Honcho Memory Activation
+          </div>
           <div style={{ color: "#475569", maxWidth: "70ch" }}>
-            Connect Honcho, initialize memory for this company, and import issue comments and issue documents without leaving Paperclip.
+            Connect Honcho, initialize memory for this company, and import issue
+            comments and issue documents without leaving Paperclip.
           </div>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <StatusPill label={`Connection: ${companyStatus?.connectionStatus ?? "unknown"}`} tone={countTone(companyStatus?.connectionStatus)} />
-          <StatusPill label={`Initialization: ${companyStatus?.initializationStatus ?? "not_started"}`} tone={countTone(companyStatus?.initializationStatus)} />
-          <StatusPill label={`Migration: ${companyStatus?.migrationStatus ?? "not_started"}`} tone={countTone(companyStatus?.migrationStatus)} />
+          <StatusPill
+            label={`Connection: ${companyStatus?.connectionStatus ?? "unknown"}`}
+            tone={countTone(companyStatus?.connectionStatus)}
+          />
+          <StatusPill
+            label={`Initialization: ${companyStatus?.initializationStatus ?? "not_started"}`}
+            tone={countTone(companyStatus?.initializationStatus)}
+          />
+          <StatusPill
+            label={`Migration: ${companyStatus?.migrationStatus ?? "not_started"}`}
+            tone={countTone(companyStatus?.migrationStatus)}
+          />
         </div>
       </div>
 
       <SecretSection
         companyId={companyId}
         config={settings.configJson}
-        onConfigChange={(next) => settings.setConfigJson((current) => ({ ...current, ...next }))}
+        onConfigChange={(next) =>
+          settings.setConfigJson((current) => ({ ...current, ...next }))
+        }
       />
 
       <SyncProfileSection
         config={settings.configJson}
-        onConfigChange={(next) => settings.setConfigJson((current) => ({ ...current, ...next }))}
+        onConfigChange={(next) =>
+          settings.setConfigJson((current) => ({ ...current, ...next }))
+        }
       />
 
       <div style={cardStyle}>
-        <div style={{ fontSize: "1rem", fontWeight: 600 }}>Company memory status</div>
+        <div style={{ fontSize: "1rem", fontWeight: 600 }}>
+          Company memory status
+        </div>
         <StatsGrid status={status ?? null} />
-        <Row label="Company" value={context.companyId ?? "No company selected"} />
+        <Row
+          label="Company"
+          value={context.companyId ?? "No company selected"}
+        />
         {!context.companyId && companies[0] ? (
-          <Row label="Resolved company" value={`${companies[0].name} (${companies[0].issuePrefix ?? companies[0].id})`} />
+          <Row
+            label="Resolved company"
+            value={`${companies[0].name} (${companies[0].issuePrefix ?? companies[0].id})`}
+          />
         ) : null}
-        <Row label="Last successful sync" value={companyStatus?.lastSuccessfulSyncAt ?? "Not synced yet"} />
-        <Row label="Workspace status" value={companyStatus?.workspaceStatus ?? "unknown"} />
-        <Row label="Peer status" value={companyStatus?.peerStatus ?? "not_started"} />
-        <Row label="Checkpoint" value={jobStatus.data?.checkpoint?.status ?? "idle"} />
-        <Row label="Current job" value={jobStatus.data?.checkpoint?.activeJobKey ?? "None"} />
-        <Row label="Last initialization report" value={companyStatus?.lastInitializationReport ? "Available" : "None"} />
+        <Row
+          label="Last successful sync"
+          value={companyStatus?.lastSuccessfulSyncAt ?? "Not synced yet"}
+        />
+        <Row
+          label="Workspace status"
+          value={companyStatus?.workspaceStatus ?? "unknown"}
+        />
+        <Row
+          label="Peer status"
+          value={companyStatus?.peerStatus ?? "not_started"}
+        />
+        <Row
+          label="Checkpoint"
+          value={jobStatus.data?.checkpoint?.status ?? "idle"}
+        />
+        <Row
+          label="Current job"
+          value={jobStatus.data?.checkpoint?.activeJobKey ?? "None"}
+        />
+        <Row
+          label="Last initialization report"
+          value={companyStatus?.lastInitializationReport ? "Available" : "None"}
+        />
         <Row
           label="Compatibility mode"
           value="Tool-first memory is active. Run transcript import and legacy workspace file import require a newer Paperclip host."
@@ -866,15 +1156,46 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontSize: "1rem", fontWeight: 600 }}>Migration preview</div>
-        <Row label="Source types" value={preview.data?.sourceTypes?.join(", ") ?? "Run a scan to generate preview"} />
-        <Row label="Issue comments" value={preview.data?.totals.comments ?? 0} />
-        <Row label="Issue documents" value={preview.data?.totals.documents ?? 0} />
-        <Row label="Legacy files" value={(preview.data as Record<string, unknown> | null)?.totals && typeof (preview.data as Record<string, any>).totals.files === "number" ? (preview.data as Record<string, any>).totals.files : 0} />
-        <Row label="Estimated messages" value={preview.data?.estimatedMessages ?? 0} />
-        <Row label="Warnings" value={preview.data?.warnings?.join("; ") || "None"} />
+        <div style={{ fontSize: "1rem", fontWeight: 600 }}>
+          Migration preview
+        </div>
+        <Row
+          label="Source types"
+          value={
+            preview.data?.sourceTypes?.join(", ") ??
+            "Run a scan to generate preview"
+          }
+        />
+        <Row
+          label="Issue comments"
+          value={preview.data?.totals.comments ?? 0}
+        />
+        <Row
+          label="Issue documents"
+          value={preview.data?.totals.documents ?? 0}
+        />
+        <Row
+          label="Legacy files"
+          value={
+            (preview.data as Record<string, unknown> | null)?.totals &&
+            typeof (preview.data as Record<string, any>).totals.files ===
+              "number"
+              ? (preview.data as Record<string, any>).totals.files
+              : 0
+          }
+        />
+        <Row
+          label="Estimated messages"
+          value={preview.data?.estimatedMessages ?? 0}
+        />
+        <Row
+          label="Warnings"
+          value={preview.data?.warnings?.join("; ") || "None"}
+        />
         <div style={{ display: "grid", gap: "0.5rem" }}>
-          <div style={{ fontSize: "0.92rem", fontWeight: 600 }}>Migration mapping</div>
+          <div style={{ fontSize: "0.92rem", fontWeight: 600 }}>
+            Migration mapping
+          </div>
           <MigrationIssueList issues={preview.data?.issues ?? []} />
         </div>
       </div>
@@ -898,14 +1219,22 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
               void runActivation();
             }}
           >
-            {isActivating ? `${activationStepLabel ?? "Initializing Honcho memory"}...` : "Initialize Honcho memory"}
+            {isActivating
+              ? `${activationStepLabel ?? "Initializing Honcho memory"}...`
+              : "Initialize Honcho memory"}
           </button>
         </div>
         {isActivating && activationStepIndex !== null && activationStepLabel ? (
-          <div style={{ color: "#475569" }}>{`Step ${activationStepIndex + 1} of 3: ${activationStepLabel}`}</div>
+          <div
+            style={{ color: "#475569" }}
+          >{`Step ${activationStepIndex + 1} of 3: ${activationStepLabel}`}</div>
         ) : null}
         {notice ? <div style={{ color: "#0f766e" }}>{notice}</div> : null}
-        {error || settings.error || jobs.error ? <div style={{ color: "#b91c1c" }}>{error ?? settings.error ?? jobs.error}</div> : null}
+        {error || settings.error || jobs.error ? (
+          <div style={{ color: "#b91c1c" }}>
+            {error ?? settings.error ?? jobs.error}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -924,18 +1253,36 @@ export function HonchoIssueMemoryTab({ context }: PluginDetailTabProps) {
   return (
     <div style={sectionStyle}>
       <div style={heroStyle}>
-        <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>Issue memory proof</div>
+        <div style={{ fontSize: "1.2rem", fontWeight: 700 }}>
+          Issue memory proof
+        </div>
         <div style={{ color: "#475569" }}>
-          This tab stays intentionally small: sync markers, prompt-context previews, and a focused resync action for this issue.
+          This tab stays intentionally small: sync markers, prompt-context
+          previews, and a focused resync action for this issue.
         </div>
       </div>
       <div style={cardStyle}>
         <Row label="Issue" value={issue?.issueIdentifier ?? issueId} />
-        <Row label="Last synced comment" value={issue?.lastSyncedCommentId ?? "Not synced"} />
-        <Row label="Last synced document revision" value={issue?.lastSyncedDocumentRevisionId ?? "Not synced"} />
-        <Row label="Latest append" value={issue?.latestAppendAt ?? "No append yet"} />
-        <Row label="Latest prompt context build" value={issue?.latestPromptContextBuiltAt ?? "Not built"} />
-        <Row label="Latest context fetch" value={issue?.contextFetchedAt ?? "Not fetched"} />
+        <Row
+          label="Last synced comment"
+          value={issue?.lastSyncedCommentId ?? "Not synced"}
+        />
+        <Row
+          label="Last synced document revision"
+          value={issue?.lastSyncedDocumentRevisionId ?? "Not synced"}
+        />
+        <Row
+          label="Latest append"
+          value={issue?.latestAppendAt ?? "No append yet"}
+        />
+        <Row
+          label="Latest prompt context build"
+          value={issue?.latestPromptContextBuiltAt ?? "Not built"}
+        />
+        <Row
+          label="Latest context fetch"
+          value={issue?.contextFetchedAt ?? "Not fetched"}
+        />
         {issue?.lastError ? (
           <div style={{ color: "#b91c1c" }}>{issue.lastError.message}</div>
         ) : null}
@@ -950,7 +1297,8 @@ export function HonchoIssueMemoryTab({ context }: PluginDetailTabProps) {
       <div style={cardStyle}>
         <div style={{ fontWeight: 600 }}>Latest prompt context preview</div>
         <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-          {issue?.latestPromptContextPreview ?? "No prompt context preview available yet."}
+          {issue?.latestPromptContextPreview ??
+            "No prompt context preview available yet."}
         </pre>
       </div>
       <div style={cardStyle}>
@@ -963,6 +1311,10 @@ export function HonchoIssueMemoryTab({ context }: PluginDetailTabProps) {
   );
 }
 
-export function HonchoMemoryToolbarLauncher({ context }: { context: PluginSettingsPageProps["context"] }) {
+export function HonchoMemoryToolbarLauncher({
+  context,
+}: {
+  context: PluginSettingsPageProps["context"];
+}) {
   return <HonchoSettingsPage context={context} />;
 }

@@ -1,5 +1,14 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
-import { DEFAULT_CONFIG, JOB_KEYS, ACTION_KEYS, DATA_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES, PLUGIN_VERSION } from "./constants.js";
+import {
+  DEFAULT_CONFIG,
+  JOB_KEYS,
+  ACTION_KEYS,
+  DATA_KEYS,
+  EXPORT_NAMES,
+  SLOT_IDS,
+  TOOL_NAMES,
+  PLUGIN_VERSION,
+} from "./constants.js";
 
 const PLUGIN_ID = "honcho-ai.paperclip-honcho";
 
@@ -8,7 +17,8 @@ const manifest: PaperclipPluginManifestV1 = {
   apiVersion: 1,
   version: PLUGIN_VERSION,
   displayName: "Honcho Memory",
-  description: "Tool-first Honcho memory integration for Paperclip companies, agents, issues, comments, and documents.",
+  description:
+    "Tool-first Honcho memory integration for Paperclip companies, agents, issues, comments, and documents.",
   author: "Honcho AI",
   categories: ["connector", "automation", "ui"],
   capabilities: [
@@ -43,6 +53,13 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Honcho API Key",
         format: "secret-ref",
         default: DEFAULT_CONFIG.honchoApiKey,
+      },
+      allowUnsafePrivateNetwork: {
+        type: "boolean",
+        title: "Allow Unsafe Private Network",
+        description:
+          "Retry private/reserved host lookups using direct fetch (unsafe).",
+        default: DEFAULT_CONFIG.allowUnsafePrivateNetwork,
       },
       workspacePrefix: {
         type: "string",
@@ -110,24 +127,28 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       jobKey: JOB_KEYS.initializeMemory,
       displayName: "Initialize Memory",
-      description: "Connects Honcho, creates core mappings, imports baseline issue memory, and verifies manual prompt previews.",
+      description:
+        "Connects Honcho, creates core mappings, imports baseline issue memory, and verifies manual prompt previews.",
     },
     {
       jobKey: JOB_KEYS.migrationScan,
       displayName: "Scan Migration Sources",
-      description: "Scans issue comments and issue documents and writes an import preview.",
+      description:
+        "Scans issue comments and issue documents and writes an import preview.",
     },
     {
       jobKey: JOB_KEYS.migrationImport,
       displayName: "Import Historical Memory",
-      description: "Imports the approved historical Paperclip issue memory preview into Honcho with idempotent ledger checks.",
+      description:
+        "Imports the approved historical Paperclip issue memory preview into Honcho with idempotent ledger checks.",
     },
   ],
   tools: [
     {
       name: TOOL_NAMES.getIssueContext,
       displayName: "Honcho Issue Context",
-      description: "Retrieve compact Honcho context for the current issue session.",
+      description:
+        "Retrieve compact Honcho context for the current issue session.",
       parametersSchema: {
         type: "object",
         properties: {
@@ -138,7 +159,8 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: TOOL_NAMES.searchMemory,
       displayName: "Honcho Search Memory",
-      description: "Search Honcho memory within the current workspace, narrowing to the current issue by default.",
+      description:
+        "Search Honcho memory within the current workspace, narrowing to the current issue by default.",
       parametersSchema: {
         type: "object",
         properties: {
@@ -153,7 +175,8 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: TOOL_NAMES.askPeer,
       displayName: "Honcho Ask Peer",
-      description: "Query Honcho peer chat for a target peer. Requires peer chat to be enabled in plugin config.",
+      description:
+        "Query Honcho peer chat for a target peer. Requires peer chat to be enabled in plugin config.",
       parametersSchema: {
         type: "object",
         properties: {
@@ -230,7 +253,8 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       name: TOOL_NAMES.getHierarchyContext,
       displayName: "Honcho Hierarchy Context",
-      description: "Retrieve delegated work context when the host provides lineage metadata.",
+      description:
+        "Retrieve delegated work context when the host provides lineage metadata.",
       parametersSchema: {
         type: "object",
         properties: {

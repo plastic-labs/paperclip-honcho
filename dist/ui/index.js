@@ -52,6 +52,7 @@ var RUNTIME_LAUNCHERS = [
 var DEFAULT_CONFIG = {
   honchoApiBaseUrl: "https://api.honcho.dev",
   honchoApiKey: "",
+  allowUnsafePrivateNetwork: false,
   workspacePrefix: DEFAULT_WORKSPACE_PREFIX,
   syncIssueComments: true,
   syncIssueDocuments: true,
@@ -84,6 +85,7 @@ function normalizeSettingsConfig(configJson) {
   return {
     honchoApiBaseUrl: typeof source.honchoApiBaseUrl === "string" ? source.honchoApiBaseUrl.trim() : DEFAULT_CONFIG.honchoApiBaseUrl,
     honchoApiKey: typeof source.honchoApiKey === "string" ? source.honchoApiKey.trim() : typeof source.honchoApiKeySecretRef === "string" ? source.honchoApiKeySecretRef.trim() : DEFAULT_CONFIG.honchoApiKey,
+    allowUnsafePrivateNetwork: typeof source.allowUnsafePrivateNetwork === "boolean" ? source.allowUnsafePrivateNetwork : DEFAULT_CONFIG.allowUnsafePrivateNetwork,
     workspacePrefix: typeof source.workspacePrefix === "string" ? source.workspacePrefix : DEFAULT_CONFIG.workspacePrefix,
     syncIssueComments: typeof source.syncIssueComments === "boolean" ? source.syncIssueComments : DEFAULT_CONFIG.syncIssueComments,
     syncIssueDocuments: typeof source.syncIssueDocuments === "boolean" ? source.syncIssueDocuments : DEFAULT_CONFIG.syncIssueDocuments,
@@ -102,7 +104,7 @@ function getDeploymentMode(config) {
 }
 
 // src/ui/index.tsx
-import { jsx, jsxs } from "react/jsx-runtime";
+import { Fragment, jsx, jsxs } from "react/jsx-runtime";
 var sectionStyle = {
   display: "grid",
   gap: "1rem",
@@ -464,21 +466,34 @@ function SecretSection(props) {
       "Using the default Honcho Cloud base URL: `",
       DEFAULT_CONFIG.honchoApiBaseUrl,
       "`"
-    ] }) : /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
-      /* @__PURE__ */ jsx("span", { style: labelHeaderStyle, children: "Honcho API base URL" }),
-      /* @__PURE__ */ jsx(
-        "input",
-        {
-          value: props.config.honchoApiBaseUrl,
-          onChange: (event) => {
-            const nextBaseUrl = event.target.value;
-            setCustomBaseUrlDraft(nextBaseUrl);
-            props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
-          },
-          style: inputStyle
-        }
-      ),
-      /* @__PURE__ */ jsx("span", { style: { color: "#475569", fontSize: "0.82rem" }, children: "This URL must be reachable from the Paperclip host runtime. If Paperclip runs in Docker, `localhost` may not point at your machine." })
+    ] }) : /* @__PURE__ */ jsxs(Fragment, { children: [
+      /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
+        /* @__PURE__ */ jsx("span", { style: labelHeaderStyle, children: "Honcho API base URL" }),
+        /* @__PURE__ */ jsx(
+          "input",
+          {
+            value: props.config.honchoApiBaseUrl,
+            onChange: (event) => {
+              const nextBaseUrl = event.target.value;
+              setCustomBaseUrlDraft(nextBaseUrl);
+              props.onConfigChange({ honchoApiBaseUrl: nextBaseUrl });
+            },
+            style: inputStyle
+          }
+        ),
+        /* @__PURE__ */ jsx("span", { style: { color: "#475569", fontSize: "0.82rem" }, children: "This URL must be reachable from the Paperclip host runtime. If Paperclip runs in Docker, `localhost` may not point at your machine." })
+      ] }),
+      /* @__PURE__ */ jsxs("label", { style: { display: "flex", alignItems: "center", gap: "0.55rem" }, children: [
+        /* @__PURE__ */ jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked: props.config.allowUnsafePrivateNetwork,
+            onChange: (event) => props.onConfigChange({ allowUnsafePrivateNetwork: event.target.checked })
+          }
+        ),
+        /* @__PURE__ */ jsx("span", { children: "Allow unsafe private-network Honcho hosts (internal/container DNS)" })
+      ] })
     ] }),
     /* @__PURE__ */ jsxs("label", { style: labelStyle, children: [
       /* @__PURE__ */ jsxs("span", { style: labelHeaderStyle, children: [
