@@ -11,7 +11,7 @@ import {
   systemPeerId,
   workspaceIdForCompany,
 } from "./ids.js";
-import type { HonchoActor, LineageRecord, MigrationPreview } from "./types.js";
+import type { HonchoActor, MigrationPreview } from "./types.js";
 
 type EntityType = (typeof ENTITY_TYPES)[keyof typeof ENTITY_TYPES];
 
@@ -278,25 +278,6 @@ export async function upsertImportLedger(
     data: {
       ...input,
       lastSeenAt: input.importedAt,
-    },
-  });
-}
-
-export async function upsertAgentLineage(
-  ctx: PluginContext,
-  companyId: string,
-  record: LineageRecord,
-) {
-  return await upsertEntity(ctx, {
-    entityType: ENTITY_TYPES.agentLineage,
-    scopeKind: "company",
-    scopeId: companyId,
-    externalId: `paperclip:run-lineage:${record.parentRunId}:${record.childRunId}`,
-    title: `${record.parentAgentId} -> ${record.childAgentId}`,
-    status: "mapped",
-    data: {
-      ...record,
-      updatedAt: new Date().toISOString(),
     },
   });
 }

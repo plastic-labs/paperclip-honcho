@@ -1,6 +1,5 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
-import { isHonchoCloudBaseUrl } from "./deployment.js";
 import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
 import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {

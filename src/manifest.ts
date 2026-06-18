@@ -1,5 +1,5 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
-import { DEFAULT_CONFIG, JOB_KEYS, ACTION_KEYS, DATA_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES, PLUGIN_VERSION } from "./constants.js";
+import { DEFAULT_CONFIG, JOB_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES, PLUGIN_VERSION } from "./constants.js";
 
 const PLUGIN_ID = "honcho-ai.paperclip-honcho";
 
@@ -274,7 +274,4 @@ const manifest: PaperclipPluginManifestV1 = {
   },
 };
 
-export const HONCHO_DATA_KEYS = DATA_KEYS;
-export const HONCHO_ACTION_KEYS = ACTION_KEYS;
-export const HONCHO_JOB_KEYS = JOB_KEYS;
 export default manifest;

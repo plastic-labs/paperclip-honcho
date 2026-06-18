@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { PluginSettingsPageProps } from "@paperclipai/plugin-sdk/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

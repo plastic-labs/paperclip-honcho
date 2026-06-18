@@ -64,13 +64,11 @@ import type {
   HonchoActor,
   HonchoIssueContext,
   HonchoSearchResult,
-  LineageRecord,
   NormalizedMessage,
   HonchoMessageInput,
   HonchoResolvedConfig,
   IssueDocumentBundle,
   InitializationReport,
-  LegacyFileCategory,
   MemoryStatusData,
   MigrationJobStatusData,
   MigrationPreview,
@@ -1142,7 +1140,7 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
     await repairMappings(ctx, companyId);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
 
-    const preview = await scanMigrationSources(ctx, companyId);
+    await scanMigrationSources(ctx, companyId);
     const countsBefore = await listMappingCounts(ctx, companyId);
     await importMigrationPreview(ctx, companyId);
     const probe = await probePromptContext(ctx, companyId);
@@ -1308,17 +1306,6 @@ export async function syncIssue(
 export async function replayIssue(ctx: PluginContext, issueId: string, companyId: string): Promise<SyncIssueResult> {
   await clearIssueSyncStatus(ctx, issueId);
   return await syncIssue(ctx, issueId, companyId, { replay: true });
-}
-
-export async function backfillCompany(
-  ctx: PluginContext,
-  companyId: string,
-): Promise<{ companyId: string; processedIssues: number }> {
-  const report = await initializeMemory(ctx, companyId);
-  return {
-    companyId,
-    processedIssues: report.importSummary.comments + report.importSummary.documents,
-  };
 }
 
 export async function loadIssueStatusData(ctx: PluginContext, issueId: string, companyId: string) {
