@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@paperclipai/plugin-sdk':
-        specifier: ^2026.416.0
-        version: 2026.416.0(react@19.2.4)
+        specifier: ^2026.618.0
+        version: 2026.618.0(react@19.2.4)
       react:
         specifier: '>=18'
         version: 19.2.4
@@ -244,8 +244,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@paperclipai/plugin-sdk@2026.416.0':
-    resolution: {integrity: sha512-P/KAqkDXeqA4OS8krqsbwiv2yvno5AgOhto/YAXn0yloQV2jprhsOZzXru64u4cGdohm/fRAky7iPPi7SspJ5A==}
+  '@paperclipai/plugin-sdk@2026.618.0':
+    resolution: {integrity: sha512-/8hoPh4x70/1HoaAe8Hofej1Ww5RLpMfbQb8fiXpRcLY9MkEN7XjzR0jVqTw4y2bwed+xQRhPJ5QRcviM/lPkA==}
     hasBin: true
     peerDependencies:
       react: '>=18'
@@ -253,8 +253,8 @@ packages:
       react:
         optional: true
 
-  '@paperclipai/shared@2026.416.0':
-    resolution: {integrity: sha512-ORG3f8X1Z4m/K4rbIlWP16UqPWlGSTiFtCAQajDddclY+b/Ubfn0M6Xh54+zkjy1TGVePnLGuif8EKDkX5Sb4g==}
+  '@paperclipai/shared@2026.618.0':
+    resolution: {integrity: sha512-DqfQLUiWHhYRXFtMpPCeXpB+21obNYFnqcr4bEPdRrA83l5YS/SolsqfnHu8Mj65iiSrHGhQGGc7q4kvQkV2qw==}
 
   '@rollup/rollup-android-arm-eabi@4.60.1':
     resolution: {integrity: sha512-d6FinEBLdIiK+1uACUttJKfgZREXrF0Qc2SmLII7W2AD8FfiZ9Wjd+rD/iRuf5s5dWrr1GgwXCvPqOuDquOowA==}
@@ -967,14 +967,14 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@paperclipai/plugin-sdk@2026.416.0(react@19.2.4)':
+  '@paperclipai/plugin-sdk@2026.618.0(react@19.2.4)':
     dependencies:
-      '@paperclipai/shared': 2026.416.0
+      '@paperclipai/shared': 2026.618.0
       zod: 3.25.76
     optionalDependencies:
       react: 19.2.4
 
-  '@paperclipai/shared@2026.416.0':
+  '@paperclipai/shared@2026.618.0':
     dependencies:
       zod: 3.25.76
 
