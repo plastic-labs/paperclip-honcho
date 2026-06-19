@@ -41,6 +41,7 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
     disableDefaultNoisePatterns: typeof source.disableDefaultNoisePatterns === "boolean" ? source.disableDefaultNoisePatterns : DEFAULT_CONFIG.disableDefaultNoisePatterns,
     stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
     flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset,
+    useLocalHonchoConfig: typeof source.useLocalHonchoConfig === "boolean" ? source.useLocalHonchoConfig : DEFAULT_CONFIG.useLocalHonchoConfig,
   };
 }
 

@@ -100,6 +100,12 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Flush Before Reset",
         default: DEFAULT_CONFIG.flushBeforeReset,
       },
+      useLocalHonchoConfig: {
+        type: "boolean",
+        title: "Use Local Honcho Config",
+        description: "On by default: reuse the shared local Honcho config (~/.honcho/config.json, as used by Hermes and Claude Code) for the API key when no Paperclip secret is resolved. Applies to self-hosted/local Paperclip. Turn off to force a keyless or secret-only setup.",
+        default: DEFAULT_CONFIG.useLocalHonchoConfig,
+      },
     },
   },
   entrypoints: {

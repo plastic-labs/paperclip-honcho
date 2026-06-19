@@ -1,5 +1,6 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
+import { readLocalHonchoConfig } from "./local-honcho-config.js";
 import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
 import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {
@@ -588,8 +589,36 @@ export class HonchoClient {
 }
 
 export async function createHonchoClient(input: HonchoClientInput): Promise<HonchoClient> {
-  const apiKey = input.config.honchoApiKey
-    ? await input.ctx.secrets.resolve(input.config.honchoApiKey)
-    : null;
+  const configured = input.config.honchoApiKey?.trim();
+  let apiKey: string | null = null;
+  let source = "none";
+
+  // Primary path: resolve the configured Paperclip secret reference (named or
+  // id). This is the secure, spec-compliant path; it works on hosts that have
+  // enabled company-scoped plugin secret resolution.
+  if (configured) {
+    try {
+      apiKey = await input.ctx.secrets.resolve(configured);
+      source = "secret-ref";
+    } catch (error) {
+      input.ctx.logger.warn("Honcho secret reference could not be resolved by this host", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // Local fallback (on by default): reuse the shared Honcho config used by
+  // Hermes / Claude Code (~/.honcho/config.json). Only consulted when no key was
+  // resolved from a Paperclip secret above, so a configured secret always wins.
+  // Can be turned off via useLocalHonchoConfig to force a keyless/self-hosted setup.
+  if (!apiKey && input.config.useLocalHonchoConfig) {
+    const local = readLocalHonchoConfig();
+    if (local?.apiKey) {
+      apiKey = local.apiKey;
+      source = "local-honcho-config";
+    }
+  }
+
+  input.ctx.logger.info("Honcho API key resolved", { source, hasKey: Boolean(apiKey) });
   return new HonchoClient({ ...input, apiKey });
 }

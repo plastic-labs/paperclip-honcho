@@ -23,6 +23,7 @@ export type HonchoPluginConfig = {
   disableDefaultNoisePatterns?: boolean;
   stripPlatformMetadata?: boolean;
   flushBeforeReset?: boolean;
+  useLocalHonchoConfig?: boolean;
 };
 
 export type HonchoResolvedConfig = {
@@ -39,6 +40,7 @@ export type HonchoResolvedConfig = {
   disableDefaultNoisePatterns: boolean;
   stripPlatformMetadata: boolean;
   flushBeforeReset: boolean;
+  useLocalHonchoConfig: boolean;
 };
 
 export type MigrationSourceType =

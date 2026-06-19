@@ -1,6 +1,7 @@
 import type { PluginConfigValidationResult, PluginContext } from "@paperclipai/plugin-sdk";
 import { DEFAULT_CONFIG } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
+import { hasLocalHonchoApiKey } from "./local-honcho-config.js";
 import type { HonchoPluginConfig, HonchoResolvedConfig } from "./types.js";
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
@@ -51,6 +52,7 @@ export function resolveConfig(config: HonchoPluginConfig | Record<string, unknow
     disableDefaultNoisePatterns: normalizeBoolean(input.disableDefaultNoisePatterns, DEFAULT_CONFIG.disableDefaultNoisePatterns),
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),
     flushBeforeReset: normalizeBoolean(input.flushBeforeReset, DEFAULT_CONFIG.flushBeforeReset),
+    useLocalHonchoConfig: normalizeBoolean(input.useLocalHonchoConfig, DEFAULT_CONFIG.useLocalHonchoConfig),
   };
 }
 
@@ -76,7 +78,11 @@ export function validateConfig(config: HonchoPluginConfig | Record<string, unkno
     }
   }
 
-  if (isHonchoCloudBaseUrl(resolved.honchoApiBaseUrl) && !resolved.honchoApiKey) {
+  if (
+    isHonchoCloudBaseUrl(resolved.honchoApiBaseUrl)
+    && !resolved.honchoApiKey
+    && !(resolved.useLocalHonchoConfig && hasLocalHonchoApiKey())
+  ) {
     errors.push("Honcho API key is required");
   }
 

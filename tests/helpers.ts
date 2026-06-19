@@ -24,6 +24,7 @@ export const BASE_CONFIG = {
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
   flushBeforeReset: false,
+  useLocalHonchoConfig: true,
 };
 
 export type SeedOverrides = {

@@ -108,6 +108,7 @@ export const DEFAULT_CONFIG = {
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
   flushBeforeReset: false,
+  useLocalHonchoConfig: true,
 } as const;
 
 export const ISSUE_STATUS_STATE_KEY = "issue-sync-status";
