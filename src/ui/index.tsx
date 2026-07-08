@@ -554,8 +554,12 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
   const deploymentMode = getDeploymentMode(settings.configJson);
+  // Don't hard-require the raw key field here: a valid cloud setup can also
+  // resolve its key from HONCHO_API_KEY or the shared ~/.honcho/config.json
+  // fallback, neither of which the UI can see. Defer to validateConfig/
+  // test-connection (server round-trip) to catch a truly missing key.
   const canRunConnectionActions = deploymentMode === "cloud"
-    ? Boolean(companyId && settings.configJson.honchoApiKey)
+    ? Boolean(companyId)
     : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
   const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
 

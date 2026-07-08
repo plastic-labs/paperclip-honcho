@@ -66,7 +66,7 @@ export function bootstrapLocalHonchoConfig(credentials: { apiKey: string; baseUr
     writeFileSync(
       path,
       JSON.stringify({ apiKey: credentials.apiKey, baseUrl: credentials.baseUrl }, null, 2),
-      { mode: 0o600 },
+      { mode: 0o600, flag: "wx" },
     );
   } catch {
     // Best-effort convenience only — never block plugin startup or a config
