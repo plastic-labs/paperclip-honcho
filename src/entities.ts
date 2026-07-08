@@ -38,6 +38,17 @@ async function upsertEntity(
   });
 }
 
+// Defensive wrapper around ctx.entities.list(): some Paperclip host versions
+// return null instead of [] for certain queries (observed live against a
+// real instance). Guard every call site so a host quirk can't crash the
+// plugin worker.
+async function listPluginEntities(
+  ctx: PluginContext,
+  params: Parameters<PluginContext["entities"]["list"]>[0],
+) {
+  return (await ctx.entities.list(params)) ?? [];
+}
+
 export async function upsertWorkspaceMapping(
   ctx: PluginContext,
   company: Company | null,
@@ -45,8 +56,9 @@ export async function upsertWorkspaceMapping(
   workspacePrefix: string,
   status: "created" | "existing" | "mapped" = "mapped",
   workspaceId?: string,
+  force = false,
 ) {
-  const existing = await getWorkspaceMappingRecord(ctx, companyId);
+  const existing = force ? null : await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof existing?.data.workspaceId === "string" && existing.data.workspaceId.trim()
     ? existing.data.workspaceId
     : null;
@@ -283,7 +295,7 @@ export async function upsertImportLedger(
 }
 
 export async function getImportLedgerRecord(ctx: PluginContext, companyId: string, externalId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.importLedger,
     scopeKind: "company",
     scopeId: companyId,
@@ -294,7 +306,7 @@ export async function getImportLedgerRecord(ctx: PluginContext, companyId: strin
 }
 
 export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
     scopeKind: "company",
     scopeId: companyId,
@@ -305,7 +317,7 @@ export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: s
 }
 
 export async function getSessionMappingRecord(ctx: PluginContext, issueId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.sessionMapping,
     scopeKind: "issue",
     scopeId: issueId,
@@ -393,18 +405,18 @@ export async function upsertFileImportSource(
 
 export async function listMappingCounts(ctx: PluginContext, companyId: string) {
   const [peers, sessions, ledger] = await Promise.all([
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.peerMapping,
       scopeKind: "company",
       scopeId: companyId,
       limit: 500,
     }),
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.sessionMapping,
       scopeKind: "issue",
       limit: 500,
     }),
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.importLedger,
       scopeKind: "company",
       scopeId: companyId,
@@ -412,13 +424,18 @@ export async function listMappingCounts(ctx: PluginContext, companyId: string) {
     }),
   ]);
 
+  // Some Paperclip host versions don't apply scopeKind/scopeId filters to
+  // entities.list queries server-side (observed live), so filter by scope
+  // client-side too — otherwise these counts silently include every other
+  // company's rows on a multi-company instance.
+  const companyLedger = ledger.filter((record) => record.scopeId === companyId);
   return {
-    mappedPeers: peers.length,
+    mappedPeers: peers.filter((record) => record.scopeId === companyId).length,
     mappedSessions: sessions.filter((record) => record.data.companyId === companyId).length,
-    importedComments: ledger.filter((record) => record.data.sourceType === "issue_comment").length,
-    importedDocuments: ledger.filter((record) => record.data.sourceType === "issue_document").length,
-    importedRuns: ledger.filter((record) => record.data.sourceType === "run_transcript").length,
-    importedFiles: ledger.filter((record) => String(record.data.sourceType).includes("file")).length,
+    importedComments: companyLedger.filter((record) => record.data.sourceType === "issue_comment").length,
+    importedDocuments: companyLedger.filter((record) => record.data.sourceType === "issue_document").length,
+    importedRuns: companyLedger.filter((record) => record.data.sourceType === "run_transcript").length,
+    importedFiles: companyLedger.filter((record) => String(record.data.sourceType).includes("file")).length,
   };
 }
 

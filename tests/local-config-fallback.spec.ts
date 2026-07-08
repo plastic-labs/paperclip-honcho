@@ -66,13 +66,13 @@ describe("local Honcho config fallback (Hermes/Claude-Code shared config)", () =
     expect(workspaceRequest?.headers.authorization).toBeUndefined();
   });
 
-  it("prefers a resolvable Paperclip secret over the local config", async () => {
-    writeLocalHonchoConfig({ apiKey: "local-key-should-lose" });
+  it("adopts the local base URL alongside its key when Paperclip is left at the cloud default", async () => {
+    writeLocalHonchoConfig({ apiKey: "local-key-123", baseUrl: "http://127.0.0.1:9999" });
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
-        honchoApiBaseUrl: "http://127.0.0.1:8000",
-        honchoApiKey: "HONCHO_API_KEY",
+        honchoApiBaseUrl: "https://api.honcho.dev",
+        honchoApiKey: "",
         useLocalHonchoConfig: true,
       },
     });
@@ -81,6 +81,91 @@ describe("local Honcho config fallback (Hermes/Claude-Code shared config)", () =
     await harness.performAction("test-connection");
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
-    expect(workspaceRequest?.headers.authorization).toBe("Bearer resolved:HONCHO_API_KEY");
+    expect(workspaceRequest?.url.startsWith("http://127.0.0.1:9999/")).toBe(true);
+    expect(workspaceRequest?.headers.authorization).toBe("Bearer local-key-123");
+  });
+
+  it("keeps an explicitly-configured Paperclip base URL over the local config's", async () => {
+    writeLocalHonchoConfig({ apiKey: "local-key-123", baseUrl: "http://127.0.0.1:9999" });
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "http://10.0.0.5:8000",
+        honchoApiKey: "",
+        useLocalHonchoConfig: true,
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.performAction("test-connection");
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.url.startsWith("http://10.0.0.5:8000/")).toBe(true);
+    expect(workspaceRequest?.headers.authorization).toBe("Bearer local-key-123");
+  });
+
+  it("prefers a literal configured key over the local config", async () => {
+    writeLocalHonchoConfig({ apiKey: "local-key-should-lose" });
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: {
+        honchoApiBaseUrl: "http://127.0.0.1:8000",
+        honchoApiKey: "configured-key-should-win",
+        useLocalHonchoConfig: true,
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.performAction("test-connection");
+
+    const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+    expect(workspaceRequest?.headers.authorization).toBe("Bearer configured-key-should-win");
+  });
+
+  it("falls back to HONCHO_API_KEY before the local config", async () => {
+    writeLocalHonchoConfig({ apiKey: "local-key-should-lose" });
+    process.env.HONCHO_API_KEY = "env-key-should-win";
+    try {
+      const { requests } = installFetchMock();
+      const harness = createHonchoHarness({
+        config: {
+          honchoApiBaseUrl: "http://127.0.0.1:8000",
+          honchoApiKey: "",
+          useLocalHonchoConfig: true,
+        },
+      });
+
+      await plugin.definition.setup(harness.ctx);
+      await harness.performAction("test-connection");
+
+      const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+      expect(workspaceRequest?.headers.authorization).toBe("Bearer env-key-should-win");
+    } finally {
+      delete process.env.HONCHO_API_KEY;
+    }
+  });
+
+  it("pairs HONCHO_API_BASE_URL with the env key when Paperclip is left at the cloud default", async () => {
+    process.env.HONCHO_API_KEY = "env-key";
+    process.env.HONCHO_API_BASE_URL = "http://127.0.0.1:9999";
+    try {
+      const { requests } = installFetchMock();
+      const harness = createHonchoHarness({
+        config: {
+          honchoApiBaseUrl: "https://api.honcho.dev",
+          honchoApiKey: "",
+          useLocalHonchoConfig: true,
+        },
+      });
+
+      await plugin.definition.setup(harness.ctx);
+      await harness.performAction("test-connection");
+
+      const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
+      expect(workspaceRequest?.url.startsWith("http://127.0.0.1:9999/")).toBe(true);
+    } finally {
+      delete process.env.HONCHO_API_KEY;
+      delete process.env.HONCHO_API_BASE_URL;
+    }
   });
 });

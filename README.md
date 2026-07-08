@@ -15,14 +15,15 @@ This package targets the current public/latest Paperclip host surface. It suppor
 
 ### Minimal Path
 
-1. Create a Paperclip secret containing the Honcho API key.
-   - For normal cloud usage, this is required.
-   - Local development does not require a Honcho API key, however, is currently discouraged because of the host repository not being able to reach `localhost` reliably. This can be fixed via a tunnel to the port Honcho runs on. 
-2. Open the Honcho plugin settings page in Paperclip.
-3. If you are using a self-hosted or local Honcho instance, switch the deployment to `Self-hosted / local` and set the base URL.
-4. Select the API key secret.
-5. Click `Save settings`.
-6. Click `Initialize Honcho memory`.
+1. Open the Honcho plugin settings page in Paperclip.
+2. If you are using a self-hosted or local Honcho instance, switch the deployment to `Self-hosted / local` and set the base URL.
+   - Local development does not require a Honcho API key, however, is currently discouraged because of the host repository not being able to reach `localhost` reliably. This can be fixed via a tunnel to the port Honcho runs on.
+3. Paste your Honcho API key into the `Honcho API Key` field.
+   - Note: Paperclip's plugin secret-reference system (`ctx.secrets.resolve`) is currently disabled platform-wide pending company-scoped plugin config upstream, so this field is used as a literal value rather than a secret reference. Do not treat it as more protected than plaintext plugin config.
+   - If you'd rather not put the key in Paperclip's UI, set a `HONCHO_API_KEY` environment variable (and optionally `HONCHO_API_BASE_URL`) on the plugin worker process instead.
+   - On a self-hosted, single-tenant Paperclip instance running on the same machine as Hermes/Claude Code/opencode, leaving the key blank falls back to the shared `~/.honcho/config.json` those tools already use.
+4. Click `Save settings`.
+5. Click `Initialize Honcho memory`.
 
 ## Multi-Agent Hierarchy
 

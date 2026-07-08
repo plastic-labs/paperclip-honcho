@@ -24,6 +24,7 @@ export type HonchoPluginConfig = {
   stripPlatformMetadata?: boolean;
   flushBeforeReset?: boolean;
   useLocalHonchoConfig?: boolean;
+  bootstrapLocalHonchoConfig?: boolean;
 };
 
 export type HonchoResolvedConfig = {
@@ -41,6 +42,7 @@ export type HonchoResolvedConfig = {
   stripPlatformMetadata: boolean;
   flushBeforeReset: boolean;
   useLocalHonchoConfig: boolean;
+  bootstrapLocalHonchoConfig: boolean;
 };
 
 export type MigrationSourceType =

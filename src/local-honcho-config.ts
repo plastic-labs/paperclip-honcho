@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+
+function sharedHonchoConfigPath(): string {
+  return join(homedir(), ".honcho", "config.json");
+}
 
 /**
  * The shared local Honcho config used across Honcho integrations (Hermes,
@@ -32,4 +36,40 @@ export function readLocalHonchoConfig(): { apiKey?: string; baseUrl?: string } |
 
 export function hasLocalHonchoApiKey(): boolean {
   return Boolean(readLocalHonchoConfig()?.apiKey);
+}
+
+/**
+ * Seeds the shared ~/.honcho/config.json (used by Hermes, Claude Code, and
+ * opencode) with this plugin's resolved Honcho credentials — the same kind of
+ * explicit "persist to ~/.honcho/config.json" setup action those tools
+ * already expose, triggered here from the plugin's own setup/config-save
+ * lifecycle instead of a manual command.
+ *
+ * Write-if-absent only: never overwrites an existing file. That's what makes
+ * this safe to call from a shared, multi-company worker process — the worst
+ * case is "first caller to run wins, nobody's config gets clobbered" rather
+ * than a later company's config silently overwriting an earlier one's.
+ *
+ * Stored as plaintext JSON, matching the format every other reader/writer of
+ * this shared file already uses — there is no separate encrypted-secret
+ * channel to defer to here, so there is nothing to encrypt against.
+ */
+export function bootstrapLocalHonchoConfig(credentials: { apiKey: string; baseUrl?: string }): void {
+  if (!credentials.apiKey) return;
+  if (readLocalHonchoConfig()) return;
+
+  const path = sharedHonchoConfigPath();
+  if (existsSync(path)) return;
+
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({ apiKey: credentials.apiKey, baseUrl: credentials.baseUrl }, null, 2),
+      { mode: 0o600 },
+    );
+  } catch {
+    // Best-effort convenience only — never block plugin startup or a config
+    // save on a filesystem write failure.
+  }
 }

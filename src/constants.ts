@@ -53,8 +53,6 @@ export const ACTION_KEYS = {
 
 export const JOB_KEYS = {
   initializeMemory: "initialize-memory",
-  migrationScan: "migration-scan",
-  migrationImport: "migration-import",
 } as const;
 
 export const TOOL_NAMES = {
@@ -109,6 +107,7 @@ export const DEFAULT_CONFIG = {
   stripPlatformMetadata: true,
   flushBeforeReset: false,
   useLocalHonchoConfig: true,
+  bootstrapLocalHonchoConfig: false,
 } as const;
 
 export const ISSUE_STATUS_STATE_KEY = "issue-sync-status";

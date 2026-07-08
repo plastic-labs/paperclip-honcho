@@ -42,6 +42,7 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
     stripPlatformMetadata: typeof source.stripPlatformMetadata === "boolean" ? source.stripPlatformMetadata : DEFAULT_CONFIG.stripPlatformMetadata,
     flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset,
     useLocalHonchoConfig: typeof source.useLocalHonchoConfig === "boolean" ? source.useLocalHonchoConfig : DEFAULT_CONFIG.useLocalHonchoConfig,
+    bootstrapLocalHonchoConfig: typeof source.bootstrapLocalHonchoConfig === "boolean" ? source.bootstrapLocalHonchoConfig : DEFAULT_CONFIG.bootstrapLocalHonchoConfig,
   };
 }
 

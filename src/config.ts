@@ -53,6 +53,7 @@ export function resolveConfig(config: HonchoPluginConfig | Record<string, unknow
     stripPlatformMetadata: normalizeBoolean(input.stripPlatformMetadata, DEFAULT_CONFIG.stripPlatformMetadata),
     flushBeforeReset: normalizeBoolean(input.flushBeforeReset, DEFAULT_CONFIG.flushBeforeReset),
     useLocalHonchoConfig: normalizeBoolean(input.useLocalHonchoConfig, DEFAULT_CONFIG.useLocalHonchoConfig),
+    bootstrapLocalHonchoConfig: normalizeBoolean(input.bootstrapLocalHonchoConfig, DEFAULT_CONFIG.bootstrapLocalHonchoConfig),
   };
 }
 
@@ -81,6 +82,7 @@ export function validateConfig(config: HonchoPluginConfig | Record<string, unkno
   if (
     isHonchoCloudBaseUrl(resolved.honchoApiBaseUrl)
     && !resolved.honchoApiKey
+    && !process.env.HONCHO_API_KEY?.trim()
     && !(resolved.useLocalHonchoConfig && hasLocalHonchoApiKey())
   ) {
     errors.push("Honcho API key is required");

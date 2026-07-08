@@ -25,7 +25,6 @@ const manifest: PaperclipPluginManifestV1 = {
     "jobs.schedule",
     "agent.tools.register",
     "http.outbound",
-    "secrets.read-ref",
     "instance.settings.register",
     "ui.detailTab.register",
     "ui.action.register",
@@ -41,7 +40,7 @@ const manifest: PaperclipPluginManifestV1 = {
       honchoApiKey: {
         type: "string",
         title: "Honcho API Key",
-        format: "secret-ref",
+        description: "Paste your Honcho API key directly. If left blank, the plugin falls back to a HONCHO_API_KEY environment variable on the worker process, then to the shared ~/.honcho/config.json used by Hermes/Claude Code/opencode.",
         default: DEFAULT_CONFIG.honchoApiKey,
       },
       workspacePrefix: {
@@ -103,8 +102,14 @@ const manifest: PaperclipPluginManifestV1 = {
       useLocalHonchoConfig: {
         type: "boolean",
         title: "Use Local Honcho Config",
-        description: "On by default: reuse the shared local Honcho config (~/.honcho/config.json, as used by Hermes and Claude Code) for the API key when no Paperclip secret is resolved. Applies to self-hosted/local Paperclip. Turn off to force a keyless or secret-only setup.",
+        description: "On by default: reuse the shared local Honcho config (~/.honcho/config.json, as used by Hermes and Claude Code) for the API key when no key is configured above or via HONCHO_API_KEY. Applies to self-hosted/local Paperclip. Turn off to force a keyless or explicitly-configured-only setup.",
         default: DEFAULT_CONFIG.useLocalHonchoConfig,
+      },
+      bootstrapLocalHonchoConfig: {
+        type: "boolean",
+        title: "Bootstrap Local Honcho Config",
+        description: "Off by default: when a Honcho API key is configured above, write it to ~/.honcho/config.json if that file doesn't already exist, so Hermes/Claude Code/opencode on this box can reuse it too. Never overwrites an existing file. Only makes sense for a single-tenant, self-hosted Paperclip instance running on the same machine.",
+        default: DEFAULT_CONFIG.bootstrapLocalHonchoConfig,
       },
     },
   },
@@ -117,16 +122,6 @@ const manifest: PaperclipPluginManifestV1 = {
       jobKey: JOB_KEYS.initializeMemory,
       displayName: "Initialize Memory",
       description: "Connects Honcho, creates core mappings, imports baseline issue memory, and verifies manual prompt previews.",
-    },
-    {
-      jobKey: JOB_KEYS.migrationScan,
-      displayName: "Scan Migration Sources",
-      description: "Scans issue comments and issue documents and writes an import preview.",
-    },
-    {
-      jobKey: JOB_KEYS.migrationImport,
-      displayName: "Import Historical Memory",
-      description: "Imports the approved historical Paperclip issue memory preview into Honcho with idempotent ledger checks.",
     },
   ],
   tools: [

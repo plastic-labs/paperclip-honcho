@@ -22,6 +22,7 @@ import {
   peerIdForAgent,
   peerIdForUser,
   systemPeerId,
+  workspaceIdForCompany,
 } from "./ids.js";
 import {
   actorFromComment,
@@ -1136,8 +1137,11 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
   });
 
   try {
-    await client.probeConnection(companyId, company);
+    // repairMappings must run before probeConnection: it force-corrects a
+    // stale workspace mapping if one exists, and probeConnection would
+    // otherwise throw on that exact mismatch before repair ever gets to run.
     await repairMappings(ctx, companyId);
+    await client.probeConnection(companyId, company);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
 
     await scanMigrationSources(ctx, companyId);
@@ -1409,8 +1413,15 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   const client = await createHonchoClient({ ctx, config });
   let repaired = 0;
 
+  // Force the persisted mapping to match what current config/company name
+  // computes before touching the client. A stale mapping (e.g. recorded back
+  // when the company had no name yet) would otherwise make
+  // ensureCompanyWorkspace throw a "mapping mismatch" error before repair
+  // ever gets a chance to run — the exact case this function exists to fix.
+  const expectedWorkspaceId = workspaceIdForCompany(companyId, config.workspacePrefix, company?.name ?? null);
+  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", expectedWorkspaceId, true);
+
   const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", workspaceId);
   repaired += 1;
 
   const agents = await listCompanyAgents(ctx, companyId);

@@ -25,6 +25,7 @@ export const BASE_CONFIG = {
   stripPlatformMetadata: true,
   flushBeforeReset: false,
   useLocalHonchoConfig: true,
+  bootstrapLocalHonchoConfig: false,
 };
 
 export type SeedOverrides = {
