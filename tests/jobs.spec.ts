@@ -475,6 +475,48 @@ describe("honcho memory jobs", () => {
     expect(peerMappings[0]?.data).toMatchObject({ peerId: firstAgentPeerId });
   });
 
+  it("imports a source exactly once even when the candidate list is duplicated and the ledger is unavailable", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    // Simulate the real failure mode: the per-job invocation scope makes the
+    // import ledger unavailable (reads empty, writes throw), so the ledger
+    // cannot dedup. Everything else (Honcho appends, session provenance) works.
+    const realList = harness.ctx.entities.list.bind(harness.ctx.entities);
+    const realUpsert = harness.ctx.entities.upsert.bind(harness.ctx.entities);
+    harness.ctx.entities.list = (async (params: Parameters<typeof realList>[0]) =>
+      params.entityType === "honcho-import-ledger" ? [] : realList(params)) as typeof realList;
+    harness.ctx.entities.upsert = (async (input: Parameters<typeof realUpsert>[0]) => {
+      if (input.entityType === "honcho-import-ledger") throw new Error("invocation scope expired");
+      return realUpsert(input);
+    }) as typeof realUpsert;
+
+    // The same comment appears twice in the candidate list (e.g. a host that
+    // repeats issue-list pages). It must still import exactly once.
+    const comment = {
+      sourceType: "issue_comments" as const,
+      issueId: "iss_1",
+      issueIdentifier: "PAP-1",
+      sourceId: "c_dup",
+      fingerprint: "fp_c_dup",
+      authorType: "user" as const,
+      authorId: "user_1",
+      createdAt: new Date("2026-03-15T12:05:00.000Z").toISOString(),
+      content: "A duplicated historical comment that must import exactly once.",
+      title: "PAP-1",
+      metadata: { commentId: "c_dup", issueId: "iss_1", companyId: "co_1" },
+    };
+    setMigrationCandidatesLoaderForTests(async () => [comment, { ...comment }]);
+
+    await plugin.definition.setup(harness.ctx);
+    await importMigrationPreview(harness.ctx, "co_1");
+
+    const appendedMessages = requestsMatching(requests, "/messages")
+      .filter((request) => Array.isArray(request.body?.messages))
+      .reduce((total, request) => total + (request.body!.messages as unknown[]).length, 0);
+    expect(appendedMessages).toBe(1);
+  });
+
   it("migration-import maps agent profile files to agent peers instead of owner peers", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness();

@@ -487,6 +487,7 @@ function normalizeAndFilterMessage(
 
 async function listCompanyIssues(ctx: PluginContext, companyId: string): Promise<Issue[]> {
   const issues: Issue[] = [];
+  const seen = new Set<string>();
   let offset = 0;
   while (true) {
     const batch = await ctx.issues.list({
@@ -495,7 +496,18 @@ async function listCompanyIssues(ctx: PluginContext, companyId: string): Promise
       offset,
     });
     if (batch.length === 0) break;
-    issues.push(...batch);
+    // Dedup by id and stop once a batch adds nothing new. Some hosts clamp or
+    // ignore `offset`, returning overlapping/repeated pages; without this guard
+    // that both duplicates every downstream candidate (→ duplicate Honcho
+    // messages) and can loop forever.
+    let added = 0;
+    for (const issue of batch) {
+      if (seen.has(issue.id)) continue;
+      seen.add(issue.id);
+      issues.push(issue);
+      added += 1;
+    }
+    if (added === 0) break;
     offset += batch.length;
   }
   return issues;
@@ -587,6 +599,21 @@ async function buildMigrationCandidates(
   });
 }
 
+function dedupeMigrationCandidates(candidates: MigrationSourceCandidate[]): MigrationSourceCandidate[] {
+  // Guarantee each source is imported at most once per run, independent of any
+  // upstream duplication (e.g. a host that repeats issue-list pages). Keyed by
+  // (sourceType, sourceId) — the same identity used for the import ledger.
+  const seen = new Set<string>();
+  const out: MigrationSourceCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.sourceType}:${candidate.sourceId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  return out;
+}
+
 async function loadMigrationCandidates(
   ctx: PluginContext,
   companyId: string,
@@ -594,7 +621,7 @@ async function loadMigrationCandidates(
   const candidates = migrationCandidatesLoaderOverride
     ? await migrationCandidatesLoaderOverride(ctx, companyId)
     : await buildMigrationCandidates(ctx, companyId);
-  return await filterAlreadySyncedMigrationCandidates(ctx, candidates);
+  return await filterAlreadySyncedMigrationCandidates(ctx, dedupeMigrationCandidates(candidates));
 }
 
 function extractDocumentRevisionId(candidate: MigrationSourceCandidate): string | null {
@@ -830,6 +857,30 @@ async function buildMemoryStatusData(ctx: PluginContext, companyId: string): Pro
   };
 }
 
+// The import ledger is a best-effort optimization layered on top of the
+// authoritative, scope-independent dedup sources (the per-run provenance cache
+// and Honcho's own session messages). The host's per-job invocation scope can
+// expire mid-import on a large company, which makes ctx.entities calls throw;
+// letting a ledger read/write failure abort the whole import would both stop it
+// early and — because the append already happened — risk a duplicate on the
+// next run. Swallowing those failures lets the import keep going and stay
+// idempotent via provenance instead.
+async function safeGetImportLedgerRecord(ctx: PluginContext, companyId: string, externalId: string) {
+  try {
+    return await getImportLedgerRecord(ctx, companyId, externalId);
+  } catch {
+    return null;
+  }
+}
+
+async function safeUpsertImportLedger(ctx: PluginContext, companyId: string, input: Parameters<typeof upsertImportLedger>[2]) {
+  try {
+    await upsertImportLedger(ctx, companyId, input);
+  } catch {
+    // Non-fatal: provenance-based dedup still prevents re-import.
+  }
+}
+
 async function ensureMigrationCandidateImported(
   ctx: PluginContext,
   companyId: string,
@@ -845,7 +896,7 @@ async function ensureMigrationCandidateImported(
       : candidate.workspaceId && candidate.metadata.relativePath
         ? fileExternalId(candidate.workspaceId, String(candidate.metadata.relativePath))
         : candidate.sourceId;
-  const existing = await getImportLedgerRecord(ctx, companyId, externalId);
+  const existing = await safeGetImportLedgerRecord(ctx, companyId, externalId);
   if (existing && existing.data.fingerprint === candidate.fingerprint) {
     return { imported: false, skipped: true };
   }
@@ -875,7 +926,7 @@ async function ensureMigrationCandidateImported(
       sessionProvenanceCache.set(issue.id, existingSessionProvenance);
     }
     if (candidateProvenanceKey && existingSessionProvenance.has(candidateProvenanceKey)) {
-      await upsertImportLedger(ctx, companyId, {
+      await safeUpsertImportLedger(ctx, companyId, {
         sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
         externalId,
         fingerprint: candidate.fingerprint,
@@ -901,7 +952,14 @@ async function ensureMigrationCandidateImported(
       metadata: candidate.metadata as HonchoMessageInput["metadata"],
     }]);
 
-    await upsertImportLedger(ctx, companyId, {
+    // Mark this source as present in the session immediately after the append
+    // succeeds, before the (best-effort, scope-dependent) ledger write — so a
+    // ledger-write failure can never leave a same-run duplicate uncaught.
+    if (candidateProvenanceKey) {
+      existingSessionProvenance.add(candidateProvenanceKey);
+    }
+
+    await safeUpsertImportLedger(ctx, companyId, {
       sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
       externalId,
       fingerprint: candidate.fingerprint,
@@ -910,9 +968,6 @@ async function ensureMigrationCandidateImported(
       importedAt: new Date().toISOString(),
       metadata: candidate.metadata,
     });
-    if (candidateProvenanceKey) {
-      existingSessionProvenance.add(candidateProvenanceKey);
-    }
   } else {
     const isGuidance = candidate.sourceType === "workspace_guidance_files";
     const isAgentProfile = candidate.sourceType === "agent_profile_files";
