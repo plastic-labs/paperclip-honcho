@@ -353,6 +353,33 @@ describe("honcho sync", () => {
     expect(new Set(documentKeys)).toEqual(new Set(["alpha", "beta"]));
   });
 
+  it("does not re-emit an already-synced document when upgrading from the legacy single-cursor state", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: { syncIssueComments: false, syncIssueDocuments: true },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    // Simulate a legacy issue synced before syncedDocumentRevisions existed:
+    // only the old single-cursor fields are present for the "design" doc.
+    await harness.ctx.state.set(
+      { scopeKind: "issue", scopeId: "iss_1", namespace: "honcho", stateKey: "issue-sync-status" },
+      {
+        lastSyncedDocumentRevisionKey: "design",
+        lastSyncedDocumentRevisionId: "rev_2",
+      },
+    );
+
+    await harness.emit("issue.updated", { key: "design" }, {
+      entityId: "iss_1", entityType: "issue", companyId: "co_1",
+    });
+
+    // The default "design" doc's current revision is rev_2 — already covered by
+    // the legacy cursor — so the first post-upgrade sync must not re-append it.
+    expect(requestsMatching(requests, "/messages")).toHaveLength(0);
+  });
+
   it("does not re-append comments already imported by migration on the next event sync", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness();

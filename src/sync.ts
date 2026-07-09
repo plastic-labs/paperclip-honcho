@@ -350,6 +350,23 @@ async function buildCommentMessages(
   return messages;
 }
 
+// Back-compat shim for the per-document dedup cursor. Issues synced before
+// syncedDocumentRevisions existed only have the legacy single-cursor fields
+// (lastSyncedDocumentRevisionKey/Id). Seeding the map from them means a
+// single-document issue (the common case) never re-emits its already-synced
+// document on the first sync after upgrade. Multi-document issues re-emit any
+// document the legacy cursor didn't cover exactly once, then settle into
+// correct per-document dedup — strictly better than the old cursor, which
+// re-emitted those documents on every sync.
+function resolveSyncedDocumentRevisions(status: IssueSyncStatus): Record<string, string> {
+  const stored = status.syncedDocumentRevisions;
+  if (stored && Object.keys(stored).length > 0) return stored;
+  if (status.lastSyncedDocumentRevisionKey && status.lastSyncedDocumentRevisionId) {
+    return { [status.lastSyncedDocumentRevisionKey]: status.lastSyncedDocumentRevisionId };
+  }
+  return {};
+}
+
 async function buildDocumentMessages(
   ctx: PluginContext,
   issue: Issue,
@@ -1312,7 +1329,7 @@ export async function syncIssue(
         ? await buildCommentMessages(ctx, resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId)
         : [];
       const documentMessages = config.syncIssueDocuments
-        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay, status.syncedDocumentRevisions ?? {})
+        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay, resolveSyncedDocumentRevisions(status))
         : [];
       const allMessages = [...commentMessages, ...documentMessages];
       if (allMessages.length > 0) {
@@ -1327,7 +1344,7 @@ export async function syncIssue(
       // after a successful append (freshly synced this pass, or synced earlier
       // and skipped). Record each document's revision id so the next sync only
       // re-emits documents whose revision actually changed.
-      const nextSyncedDocumentRevisions: Record<string, string> = { ...(status.syncedDocumentRevisions ?? {}) };
+      const nextSyncedDocumentRevisions: Record<string, string> = { ...resolveSyncedDocumentRevisions(status) };
       if (config.syncIssueDocuments) {
         for (const bundle of resources.documents) {
           for (const revision of bundle.revisions) {
