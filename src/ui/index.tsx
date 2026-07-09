@@ -117,12 +117,6 @@ const migrationRowStyle: React.CSSProperties = {
   border: "1px solid rgba(15, 23, 42, 0.08)",
 };
 
-type CompanySecretRecord = {
-  id: string;
-  name: string;
-  description: string | null;
-};
-
 type PluginJobRecord = {
   id: string;
   jobKey: string;
@@ -251,48 +245,6 @@ function useSettingsConfig() {
   };
 }
 
-function useCompanySecrets(companyId: string | null | undefined) {
-  const [secrets, setSecrets] = useState<CompanySecretRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = async () => {
-    if (!companyId) return;
-    setLoading(true);
-    try {
-      const result = await hostFetchJson<CompanySecretRecord[]>(`/api/companies/${companyId}/secrets`);
-      setSecrets(result);
-      setError(null);
-    } catch (nextError) {
-      setError(formatUnknownError(nextError));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, [companyId]);
-
-  async function createSecret(input: { name: string; value: string; description?: string | null }) {
-    if (!companyId) throw new Error("companyId is required");
-    setCreating(true);
-    try {
-      const created = await hostFetchJson<CompanySecretRecord>(`/api/companies/${companyId}/secrets`, {
-        method: "POST",
-        body: JSON.stringify(input),
-      });
-      await refresh();
-      return created;
-    } finally {
-      setCreating(false);
-    }
-  }
-
-  return { secrets, loading, creating, error, refresh, createSecret };
-}
-
 function usePluginJobs() {
   const [jobs, setJobs] = useState<PluginJobRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -412,21 +364,13 @@ function countTone(value: string | null | undefined, good: string[] = ["complete
 }
 
 function SecretSection(props: {
-  companyId: string | null;
   config: SettingsConfig;
   onConfigChange(next: Partial<SettingsConfig>): void;
 }) {
-  const { secrets, refresh, createSecret, loading, creating, error } = useCompanySecrets(props.companyId);
   const deploymentMode = getDeploymentMode(props.config);
-  const [draftOpen, setDraftOpen] = useState(false);
   const [customBaseUrlDraft, setCustomBaseUrlDraft] = useState(
     deploymentMode === "self-hosted" ? props.config.honchoApiBaseUrl : "",
   );
-  const [draft, setDraft] = useState({
-    name: "HONCHO_API_KEY",
-    value: "",
-    description: "Honcho API key for Paperclip memory activation",
-  });
 
   useEffect(() => {
     if (deploymentMode === "self-hosted") {
@@ -449,7 +393,7 @@ function SecretSection(props: {
       <div>
         <div style={{ fontSize: "1rem", fontWeight: 600 }}>Connect Honcho</div>
         <div style={{ color: "#475569", fontSize: "0.9rem" }}>
-          Choose Honcho Cloud or a self-hosted/local deployment, then create or select a Paperclip secret that holds the Honcho API key.
+          Choose Honcho Cloud or a self-hosted/local deployment, then paste your Honcho API key below.
         </div>
       </div>
       <label style={labelStyle}>
@@ -489,69 +433,19 @@ function SecretSection(props: {
           <span>Honcho API Key</span>
           {deploymentMode === "self-hosted" ? <span style={optionalTagStyle}>Optional</span> : null}
         </span>
-        <select
+        <input
+          type="password"
           value={props.config.honchoApiKey}
           onChange={(event) => props.onConfigChange({ honchoApiKey: event.target.value })}
-          style={selectStyle}
-        >
-          <option value="">Select a Paperclip secret…</option>
-          {secrets.map((secret) => (
-            <option key={secret.id} value={secret.id}>
-              {secret.name}
-            </option>
-          ))}
-        </select>
+          placeholder="Paste your Honcho API key"
+          style={inputStyle}
+        />
+        <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+          Stored as plain plugin config, not a Paperclip secret reference (that system is currently disabled
+          platform-wide). If you'd rather not put the key here, leave this blank and set a{" "}
+          <code>HONCHO_API_KEY</code> environment variable on the plugin worker process instead.
+        </span>
       </label>
-      <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
-        <button style={buttonStyle} onClick={() => void refresh()} disabled={loading}>
-          Refresh secrets
-        </button>
-        <button style={buttonStyle} onClick={() => setDraftOpen((value) => !value)}>
-          {draftOpen ? "Hide secret form" : "Create secret"}
-        </button>
-      </div>
-      {draftOpen ? (
-        <div style={{ display: "grid", gap: "0.75rem" }}>
-          <label style={labelStyle}>
-            <span>Secret name</span>
-            <input
-              value={draft.name}
-              onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-              style={inputStyle}
-            />
-          </label>
-          <label style={labelStyle}>
-            <span>Honcho API key value</span>
-            <input
-              type="password"
-              value={draft.value}
-              onChange={(event) => setDraft((current) => ({ ...current, value: event.target.value }))}
-              style={inputStyle}
-            />
-          </label>
-          <label style={labelStyle}>
-            <span>Description</span>
-            <input
-              value={draft.description}
-              onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))}
-              style={inputStyle}
-            />
-          </label>
-          <button
-            style={buttonStyle}
-            disabled={!props.companyId || !draft.value.trim() || creating}
-            onClick={async () => {
-              const created = await createSecret(draft);
-              props.onConfigChange({ honchoApiKey: created.id });
-              setDraft((current) => ({ ...current, value: "" }));
-              setDraftOpen(false);
-            }}
-          >
-            Create and select secret
-          </button>
-        </div>
-      ) : null}
-      {error ? <div style={{ color: "#b91c1c" }}>{error}</div> : null}
     </div>
   );
 }
@@ -602,6 +496,19 @@ function SyncProfileSection(props: {
           onChange={(event) => props.onConfigChange({ workspacePrefix: event.target.value })}
           style={inputStyle}
         />
+      </label>
+      <label style={labelStyle}>
+        <span>Agent runtime home path template (optional)</span>
+        <input
+          value={props.config.agentRuntimeHomePathTemplate}
+          onChange={(event) => props.onConfigChange({ agentRuntimeHomePathTemplate: event.target.value })}
+          placeholder="/path/to/.paperclip/instances/default/companies/{companyId}/codex-home"
+          style={inputStyle}
+        />
+        <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+          When set, "Initialize Honcho memory" writes an MCP bridge script into this company's Codex runtime home
+          (with <code>{"{companyId}"}</code> substituted) so agents can call Honcho tools on demand. Machine-specific; leave blank to disable.
+        </span>
       </label>
     </div>
   );
@@ -660,8 +567,12 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
   const deploymentMode = getDeploymentMode(settings.configJson);
+  // Don't hard-require the raw key field here: a valid cloud setup can also
+  // resolve its key from HONCHO_API_KEY or the shared ~/.honcho/config.json
+  // fallback, neither of which the UI can see. Defer to validateConfig/
+  // test-connection (server round-trip) to catch a truly missing key.
   const canRunConnectionActions = deploymentMode === "cloud"
-    ? Boolean(companyId && settings.configJson.honchoApiKey)
+    ? Boolean(companyId)
     : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
   const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
 
@@ -831,7 +742,6 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
       </div>
 
       <SecretSection
-        companyId={companyId}
         config={settings.configJson}
         onConfigChange={(next) => settings.setConfigJson((current) => ({ ...current, ...next }))}
       />

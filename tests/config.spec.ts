@@ -33,8 +33,6 @@ describe("honcho config", () => {
     ]));
     expect(manifest.jobs).toEqual(expect.arrayContaining([
       expect.objectContaining({ jobKey: "initialize-memory" }),
-      expect.objectContaining({ jobKey: "migration-scan" }),
-      expect.objectContaining({ jobKey: "migration-import" }),
     ]));
     expect(manifest.ui?.slots).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "settingsPage", displayName: "Honcho Settings" }),
@@ -188,7 +186,7 @@ describe("honcho config", () => {
     });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
-    expect(workspaceRequest?.headers.authorization).toBe("Bearer resolved:HONCHO_API_KEY");
+    expect(workspaceRequest?.headers.authorization).toBe("Bearer HONCHO_API_KEY");
   });
 
   it("accepts legacy config aliases while resolving to the renamed public keys", async () => {

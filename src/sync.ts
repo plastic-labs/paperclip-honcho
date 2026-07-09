@@ -41,12 +41,14 @@ import {
   patchIssueSyncStatus,
 } from "./state.js";
 import { createHonchoClient } from "./honcho-client.js";
+import { syncAgentRuntimeMcpBridge, type McpBridgeSyncResult } from "./mcp-bridge.js";
 import {
   buildMigrationReportPayload,
   ensureActorPeerMapping,
   getImportLedgerRecord,
   listJobsForUi,
   listMappingCounts,
+  resolveCanonicalAgentPeerId,
   resolveCanonicalIssueSessionId,
   upsertAgentPeerMapping,
   upsertBootstrapSessionMapping,
@@ -64,13 +66,12 @@ import type {
   HonchoActor,
   HonchoIssueContext,
   HonchoSearchResult,
-  LineageRecord,
   NormalizedMessage,
   HonchoMessageInput,
   HonchoResolvedConfig,
   IssueDocumentBundle,
+  IssueSyncStatus,
   InitializationReport,
-  LegacyFileCategory,
   MemoryStatusData,
   MigrationJobStatusData,
   MigrationPreview,
@@ -99,7 +100,9 @@ async function resolvePeerIdFromActor(
 ): Promise<string> {
   if (actor.authorType === "agent") {
     const agent = await ctx.agents.get(actor.authorId, companyId);
-    return peerIdForAgent(actor.authorId, agent?.name ?? null);
+    return agent
+      ? await resolveCanonicalAgentPeerId(ctx, companyId, agent)
+      : peerIdForAgent(actor.authorId, null);
   }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
@@ -347,22 +350,42 @@ async function buildCommentMessages(
   return messages;
 }
 
+// Back-compat shim for the per-document dedup cursor. Issues synced before
+// syncedDocumentRevisions existed only have the legacy single-cursor fields
+// (lastSyncedDocumentRevisionKey/Id). Seeding the map from them means a
+// single-document issue (the common case) never re-emits its already-synced
+// document on the first sync after upgrade. Multi-document issues re-emit any
+// document the legacy cursor didn't cover exactly once, then settle into
+// correct per-document dedup — strictly better than the old cursor, which
+// re-emitted those documents on every sync.
+function resolveSyncedDocumentRevisions(status: IssueSyncStatus): Record<string, string> {
+  const stored = status.syncedDocumentRevisions;
+  if (stored && Object.keys(stored).length > 0) return stored;
+  if (status.lastSyncedDocumentRevisionKey && status.lastSyncedDocumentRevisionId) {
+    return { [status.lastSyncedDocumentRevisionKey]: status.lastSyncedDocumentRevisionId };
+  }
+  return {};
+}
+
 async function buildDocumentMessages(
   ctx: PluginContext,
   issue: Issue,
   documents: IssueDocumentBundle[],
   config: HonchoResolvedConfig,
-  lastSyncedRevisionId: string | null,
+  replay: boolean,
+  syncedDocumentRevisions: Record<string, string>,
 ): Promise<HonchoMessageInput[]> {
   const messages: HonchoMessageInput[] = [];
-  let unlocked = lastSyncedRevisionId == null;
 
   for (const bundle of documents) {
     for (const revision of bundle.revisions) {
-      if (!unlocked) {
-        if (revision.id === lastSyncedRevisionId) {
-          unlocked = true;
-        }
+      // Per-document dedup: a document's revision is only (re)synced when its
+      // revision id differs from what was last synced for that specific
+      // document key. This is order-independent and handles multiple
+      // independently-revised documents on one issue correctly — unlike a
+      // single linear cursor, which re-synced trailing documents and dropped
+      // edits to others whenever an issue had more than one document.
+      if (!replay && syncedDocumentRevisions[bundle.document.key] === revision.id) {
         continue;
       }
       const actor = actorFromDocumentRevision(revision);
@@ -464,6 +487,7 @@ function normalizeAndFilterMessage(
 
 async function listCompanyIssues(ctx: PluginContext, companyId: string): Promise<Issue[]> {
   const issues: Issue[] = [];
+  const seen = new Set<string>();
   let offset = 0;
   while (true) {
     const batch = await ctx.issues.list({
@@ -472,7 +496,18 @@ async function listCompanyIssues(ctx: PluginContext, companyId: string): Promise
       offset,
     });
     if (batch.length === 0) break;
-    issues.push(...batch);
+    // Dedup by id and stop once a batch adds nothing new. Some hosts clamp or
+    // ignore `offset`, returning overlapping/repeated pages; without this guard
+    // that both duplicates every downstream candidate (→ duplicate Honcho
+    // messages) and can loop forever.
+    let added = 0;
+    for (const issue of batch) {
+      if (seen.has(issue.id)) continue;
+      seen.add(issue.id);
+      issues.push(issue);
+      added += 1;
+    }
+    if (added === 0) break;
     offset += batch.length;
   }
   return issues;
@@ -564,6 +599,21 @@ async function buildMigrationCandidates(
   });
 }
 
+function dedupeMigrationCandidates(candidates: MigrationSourceCandidate[]): MigrationSourceCandidate[] {
+  // Guarantee each source is imported at most once per run, independent of any
+  // upstream duplication (e.g. a host that repeats issue-list pages). Keyed by
+  // (sourceType, sourceId) — the same identity used for the import ledger.
+  const seen = new Set<string>();
+  const out: MigrationSourceCandidate[] = [];
+  for (const candidate of candidates) {
+    const key = `${candidate.sourceType}:${candidate.sourceId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(candidate);
+  }
+  return out;
+}
+
 async function loadMigrationCandidates(
   ctx: PluginContext,
   companyId: string,
@@ -571,7 +621,7 @@ async function loadMigrationCandidates(
   const candidates = migrationCandidatesLoaderOverride
     ? await migrationCandidatesLoaderOverride(ctx, companyId)
     : await buildMigrationCandidates(ctx, companyId);
-  return await filterAlreadySyncedMigrationCandidates(ctx, candidates);
+  return await filterAlreadySyncedMigrationCandidates(ctx, dedupeMigrationCandidates(candidates));
 }
 
 function extractDocumentRevisionId(candidate: MigrationSourceCandidate): string | null {
@@ -807,6 +857,30 @@ async function buildMemoryStatusData(ctx: PluginContext, companyId: string): Pro
   };
 }
 
+// The import ledger is a best-effort optimization layered on top of the
+// authoritative, scope-independent dedup sources (the per-run provenance cache
+// and Honcho's own session messages). The host's per-job invocation scope can
+// expire mid-import on a large company, which makes ctx.entities calls throw;
+// letting a ledger read/write failure abort the whole import would both stop it
+// early and — because the append already happened — risk a duplicate on the
+// next run. Swallowing those failures lets the import keep going and stay
+// idempotent via provenance instead.
+async function safeGetImportLedgerRecord(ctx: PluginContext, companyId: string, externalId: string) {
+  try {
+    return await getImportLedgerRecord(ctx, companyId, externalId);
+  } catch {
+    return null;
+  }
+}
+
+async function safeUpsertImportLedger(ctx: PluginContext, companyId: string, input: Parameters<typeof upsertImportLedger>[2]) {
+  try {
+    await upsertImportLedger(ctx, companyId, input);
+  } catch {
+    // Non-fatal: provenance-based dedup still prevents re-import.
+  }
+}
+
 async function ensureMigrationCandidateImported(
   ctx: PluginContext,
   companyId: string,
@@ -822,7 +896,7 @@ async function ensureMigrationCandidateImported(
       : candidate.workspaceId && candidate.metadata.relativePath
         ? fileExternalId(candidate.workspaceId, String(candidate.metadata.relativePath))
         : candidate.sourceId;
-  const existing = await getImportLedgerRecord(ctx, companyId, externalId);
+  const existing = await safeGetImportLedgerRecord(ctx, companyId, externalId);
   if (existing && existing.data.fingerprint === candidate.fingerprint) {
     return { imported: false, skipped: true };
   }
@@ -852,7 +926,7 @@ async function ensureMigrationCandidateImported(
       sessionProvenanceCache.set(issue.id, existingSessionProvenance);
     }
     if (candidateProvenanceKey && existingSessionProvenance.has(candidateProvenanceKey)) {
-      await upsertImportLedger(ctx, companyId, {
+      await safeUpsertImportLedger(ctx, companyId, {
         sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
         externalId,
         fingerprint: candidate.fingerprint,
@@ -878,7 +952,14 @@ async function ensureMigrationCandidateImported(
       metadata: candidate.metadata as HonchoMessageInput["metadata"],
     }]);
 
-    await upsertImportLedger(ctx, companyId, {
+    // Mark this source as present in the session immediately after the append
+    // succeeds, before the (best-effort, scope-dependent) ledger write — so a
+    // ledger-write failure can never leave a same-run duplicate uncaught.
+    if (candidateProvenanceKey) {
+      existingSessionProvenance.add(candidateProvenanceKey);
+    }
+
+    await safeUpsertImportLedger(ctx, companyId, {
       sourceType: candidate.sourceType === "issue_comments" ? "issue_comment" : candidate.sourceType === "issue_documents" ? "issue_document" : "run_transcript",
       externalId,
       fingerprint: candidate.fingerprint,
@@ -887,9 +968,6 @@ async function ensureMigrationCandidateImported(
       importedAt: new Date().toISOString(),
       metadata: candidate.metadata,
     });
-    if (candidateProvenanceKey) {
-      existingSessionProvenance.add(candidateProvenanceKey);
-    }
   } else {
     const isGuidance = candidate.sourceType === "workspace_guidance_files";
     const isAgentProfile = candidate.sourceType === "agent_profile_files";
@@ -900,7 +978,7 @@ async function ensureMigrationCandidateImported(
     const peerId = isGuidance
       ? systemPeerId()
       : agentProfile
-        ? peerIdForAgent(agentProfile.id, agentProfile.name)
+        ? await resolveCanonicalAgentPeerId(ctx, companyId, agentProfile)
         : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {
@@ -1024,6 +1102,42 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
   let failed = 0;
   let firstError: string | null = null;
 
+  // Track, per issue, the content this import confirmed is in Honcho (whether
+  // freshly imported or already present) so we can advance that issue's
+  // event-sync cursors afterward. Without this, migration import and the
+  // event-driven syncIssue path keep independent dedup state, so the first
+  // syncIssue after an initialize-memory re-appends every comment migration
+  // already imported.
+  type IssueCursorSeed = {
+    latestCommentId?: string;
+    latestCommentCreatedAt?: string;
+    documentRevisions: Record<string, string>;
+  };
+  const issueSeeds = new Map<string, IssueCursorSeed>();
+  const recordCoveredCandidate = (candidate: MigrationSourceCandidate) => {
+    if (!candidate.issueId) return;
+    const issueId = candidate.issueId;
+    const seed = issueSeeds.get(issueId) ?? { documentRevisions: {} };
+    if (candidate.sourceType === "issue_comments") {
+      // Candidates are globally sorted by createdAt ascending, so a later
+      // covered comment is always at least as recent as the current seed.
+      if (
+        !seed.latestCommentCreatedAt
+        || Date.parse(candidate.createdAt) >= Date.parse(seed.latestCommentCreatedAt)
+      ) {
+        seed.latestCommentId = candidate.sourceId;
+        seed.latestCommentCreatedAt = candidate.createdAt;
+      }
+    } else if (candidate.sourceType === "issue_documents") {
+      const documentKey = typeof candidate.metadata.documentKey === "string" ? candidate.metadata.documentKey : null;
+      const revisionId = typeof candidate.metadata.documentRevisionId === "string" ? candidate.metadata.documentRevisionId : null;
+      if (documentKey && revisionId) {
+        seed.documentRevisions[documentKey] = revisionId;
+      }
+    }
+    issueSeeds.set(issueId, seed);
+  };
+
   await patchCompanySyncStatus(ctx, companyId, {
     migrationStatus: "running",
     lastError: null,
@@ -1058,9 +1172,37 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
       } else {
         skipped += 1;
       }
+      // Imported or skipped-because-already-present both mean this content is
+      // in Honcho, so it should count toward advancing the issue's sync cursor.
+      recordCoveredCandidate(candidate);
     } catch (error) {
       failed += 1;
       firstError ??= error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // Advance each affected issue's event-sync cursors to reflect the content
+  // migration just confirmed is in Honcho. Advance-only: never regress a
+  // cursor an event sync may have already moved further forward.
+  for (const [issueId, seed] of issueSeeds) {
+    const current = await getIssueSyncStatus(ctx, issueId);
+    const patch: Partial<IssueSyncStatus> = {};
+    if (
+      seed.latestCommentId
+      && seed.latestCommentCreatedAt
+      && (
+        !current.lastSyncedCommentCreatedAt
+        || Date.parse(seed.latestCommentCreatedAt) >= Date.parse(current.lastSyncedCommentCreatedAt)
+      )
+    ) {
+      patch.lastSyncedCommentId = seed.latestCommentId;
+      patch.lastSyncedCommentCreatedAt = seed.latestCommentCreatedAt;
+    }
+    if (Object.keys(seed.documentRevisions).length > 0) {
+      patch.syncedDocumentRevisions = { ...(current.syncedDocumentRevisions ?? {}), ...seed.documentRevisions };
+    }
+    if (Object.keys(patch).length > 0) {
+      await patchIssueSyncStatus(ctx, issueId, patch);
     }
   }
 
@@ -1138,11 +1280,15 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
   });
 
   try {
-    await client.probeConnection(companyId, company);
+    // repairMappings must run before probeConnection: it ensures a workspace
+    // mapping and any missing peer/session mappings exist (self-healing a
+    // company that has issues/agents but never completed initialization)
+    // without ever changing an already-established mapping's ids.
     await repairMappings(ctx, companyId);
+    await client.probeConnection(companyId, company);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
 
-    const preview = await scanMigrationSources(ctx, companyId);
+    await scanMigrationSources(ctx, companyId);
     const countsBefore = await listMappingCounts(ctx, companyId);
     await importMigrationPreview(ctx, companyId);
     const probe = await probePromptContext(ctx, companyId);
@@ -1238,7 +1384,7 @@ export async function syncIssue(
         ? await buildCommentMessages(ctx, resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId)
         : [];
       const documentMessages = config.syncIssueDocuments
-        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId)
+        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay, resolveSyncedDocumentRevisions(status))
         : [];
       const allMessages = [...commentMessages, ...documentMessages];
       if (allMessages.length > 0) {
@@ -1249,12 +1395,25 @@ export async function syncIssue(
 
       const lastComment = resources.comments.at(-1) ?? null;
       const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
+      // Every document currently on the issue has its latest revision in Honcho
+      // after a successful append (freshly synced this pass, or synced earlier
+      // and skipped). Record each document's revision id so the next sync only
+      // re-emits documents whose revision actually changed.
+      const nextSyncedDocumentRevisions: Record<string, string> = { ...resolveSyncedDocumentRevisions(status) };
+      if (config.syncIssueDocuments) {
+        for (const bundle of resources.documents) {
+          for (const revision of bundle.revisions) {
+            nextSyncedDocumentRevisions[bundle.document.key] = revision.id;
+          }
+        }
+      }
       const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
       await patchIssueSyncStatus(ctx, issueId, {
         lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
         lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
         lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
         lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
+        syncedDocumentRevisions: nextSyncedDocumentRevisions,
         lastBackfillAt: new Date().toISOString(),
         replayInProgress: false,
         lastError: null,
@@ -1308,17 +1467,6 @@ export async function syncIssue(
 export async function replayIssue(ctx: PluginContext, issueId: string, companyId: string): Promise<SyncIssueResult> {
   await clearIssueSyncStatus(ctx, issueId);
   return await syncIssue(ctx, issueId, companyId, { replay: true });
-}
-
-export async function backfillCompany(
-  ctx: PluginContext,
-  companyId: string,
-): Promise<{ companyId: string; processedIssues: number }> {
-  const report = await initializeMemory(ctx, companyId);
-  return {
-    companyId,
-    processedIssues: report.importSummary.comments + report.importSummary.documents,
-  };
 }
 
 export async function loadIssueStatusData(ctx: PluginContext, issueId: string, companyId: string) {
@@ -1422,9 +1570,31 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   const client = await createHonchoClient({ ctx, config });
   let repaired = 0;
 
+  // Ensure a workspace mapping exists. If one is already recorded, its
+  // workspaceId is canonical and is left untouched — Honcho workspace/peer/
+  // session ids must stay stable across renames and plugin upgrades, or a
+  // company's accumulated memory (representations, conclusions, dreams)
+  // becomes unreachable the next time this runs.
+  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix);
+
   const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
-  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", workspaceId);
   repaired += 1;
+
+  // Runs right after the workspace mapping, before the per-agent/per-issue
+  // loops below: those loops can throw on a single already-mapped row (a
+  // host-side upsert quirk on existing rows, unrelated to this plugin) and
+  // abort the rest of this function, which must never take the independent
+  // MCP bridge sync down with it. Best-effort: only runs when an operator
+  // has opted in via agentRuntimeHomePathTemplate.
+  const bridgeResult = await syncAgentRuntimeMcpBridge(companyId, config).catch(
+    (error): McpBridgeSyncResult => ({
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    }),
+  );
+  if (bridgeResult.status === "failed") {
+    ctx.logger.warn("Honcho MCP bridge sync failed", { companyId, error: bridgeResult.message });
+  }
 
   const agents = await listCompanyAgents(ctx, companyId);
   for (const agent of agents) {

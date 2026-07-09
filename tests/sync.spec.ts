@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACTION_KEYS, DEFAULT_MAX_INGEST_MESSAGE_CHARS, JOB_KEYS } from "../src/constants.js";
-import { getIssueSyncQueueSizeForTests } from "../src/sync.js";
+import { getIssueSyncQueueSizeForTests, importMigrationPreview } from "../src/sync.js";
 import plugin from "../src/worker.js";
 import { buildDefaultFixtures, createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
@@ -293,6 +293,112 @@ describe("honcho sync", () => {
       stateKey: "issue-sync-status",
     }) as Record<string, unknown>;
     expect(state.lastSyncedDocumentRevisionId).toBe("rev_2");
+  });
+
+  it("dedupes documents per-document-key regardless of list order on a multi-document issue", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: { syncIssueComments: false, syncIssueDocuments: true },
+      seed: {
+        issueComments: [],
+        // "alpha" (revisionNumber 5) is listed first; "beta" (revisionNumber 2)
+        // is listed last but is NOT the highest-revisionNumber revision. The
+        // old single linear cursor pointed at the highest revision ("alpha_r5"),
+        // which sat first in list order, so every subsequent sync re-emitted
+        // "beta". Per-document-key dedup must not.
+        issueDocuments: [
+          {
+            id: "doc_alpha", companyId: "co_1", issueId: "iss_1", key: "alpha",
+            title: "Alpha", format: "markdown", body: "Alpha stable body chunk.",
+            latestRevisionId: "alpha_r5", latestRevisionNumber: 5,
+            createdByAgentId: null, createdByUserId: "user_1",
+            updatedByAgentId: null, updatedByUserId: "user_1",
+            createdAt: new Date("2026-03-15T12:00:00.000Z"), updatedAt: new Date("2026-03-15T12:05:00.000Z"),
+          },
+          {
+            id: "doc_beta", companyId: "co_1", issueId: "iss_1", key: "beta",
+            title: "Beta", format: "markdown", body: "Beta stable body chunk.",
+            latestRevisionId: "beta_r2", latestRevisionNumber: 2,
+            createdByAgentId: null, createdByUserId: "user_1",
+            updatedByAgentId: null, updatedByUserId: "user_1",
+            createdAt: new Date("2026-03-15T12:00:00.000Z"), updatedAt: new Date("2026-03-15T12:02:00.000Z"),
+          },
+        ],
+        documentRevisions: [
+          {
+            id: "alpha_r5", companyId: "co_1", documentId: "doc_alpha", issueId: "iss_1", key: "alpha",
+            revisionNumber: 5, body: "Alpha stable body chunk.", changeSummary: null,
+            createdByAgentId: null, createdByUserId: "user_1", createdAt: new Date("2026-03-15T12:05:00.000Z"),
+          },
+          {
+            id: "beta_r2", companyId: "co_1", documentId: "doc_beta", issueId: "iss_1", key: "beta",
+            revisionNumber: 2, body: "Beta stable body chunk.", changeSummary: null,
+            createdByAgentId: null, createdByUserId: "user_1", createdAt: new Date("2026-03-15T12:02:00.000Z"),
+          },
+        ],
+      },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+    const emitUpdate = () => harness.emit("issue.updated", { key: "alpha" }, {
+      entityId: "iss_1", entityType: "issue", companyId: "co_1",
+    });
+    await emitUpdate();
+    await emitUpdate();
+
+    const messageRequests = requestsMatching(requests, "/messages");
+    expect(messageRequests).toHaveLength(1);
+    const documentKeys = ((messageRequests[0]?.body?.messages ?? []) as Array<Record<string, unknown>>)
+      .map((message) => (message.metadata as Record<string, unknown>).documentKey);
+    expect(new Set(documentKeys)).toEqual(new Set(["alpha", "beta"]));
+  });
+
+  it("does not re-emit an already-synced document when upgrading from the legacy single-cursor state", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({
+      config: { syncIssueComments: false, syncIssueDocuments: true },
+    });
+
+    await plugin.definition.setup(harness.ctx);
+
+    // Simulate a legacy issue synced before syncedDocumentRevisions existed:
+    // only the old single-cursor fields are present for the "design" doc.
+    await harness.ctx.state.set(
+      { scopeKind: "issue", scopeId: "iss_1", namespace: "honcho", stateKey: "issue-sync-status" },
+      {
+        lastSyncedDocumentRevisionKey: "design",
+        lastSyncedDocumentRevisionId: "rev_2",
+      },
+    );
+
+    await harness.emit("issue.updated", { key: "design" }, {
+      entityId: "iss_1", entityType: "issue", companyId: "co_1",
+    });
+
+    // The default "design" doc's current revision is rev_2 — already covered by
+    // the legacy cursor — so the first post-upgrade sync must not re-append it.
+    expect(requestsMatching(requests, "/messages")).toHaveLength(0);
+  });
+
+  it("does not re-append comments already imported by migration on the next event sync", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+
+    // Migration seeds the issue's historical comments (and documents) into Honcho.
+    await importMigrationPreview(harness.ctx, "co_1");
+    const messagesAfterMigration = requestsMatching(requests, "/messages").length;
+    expect(messagesAfterMigration).toBeGreaterThan(0);
+
+    // The first event-driven sync after migration must NOT re-append the same
+    // content: migration advances the issue's event-sync cursors so the two
+    // dedup paths share state.
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, {
+      entityId: "iss_1", entityType: "issue", companyId: "co_1",
+    });
+
+    expect(requestsMatching(requests, "/messages").length).toBe(messagesAfterMigration);
   });
 
   it("isolates document sync failures so the event bus does not reject the event", async () => {

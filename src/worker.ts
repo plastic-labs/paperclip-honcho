@@ -1,14 +1,15 @@
 import {
   definePlugin,
   runWorker,
-  type PluginContext,
   type ToolRunContext,
   type ToolResult,
 } from "@paperclipai/plugin-sdk";
 import manifest from "./manifest.js";
 import { ACTION_KEYS, DATA_KEYS, DEFAULT_SEARCH_LIMIT, JOB_KEYS, RUNTIME_LAUNCHERS, TOOL_NAMES } from "./constants.js";
-import { assertConfigured, getResolvedConfig, validateConfig } from "./config.js";
+import { assertConfigured, getResolvedConfig, resolveConfig, validateConfig } from "./config.js";
 import { createHonchoClient } from "./honcho-client.js";
+import { bootstrapLocalHonchoConfig } from "./local-honcho-config.js";
+import type { HonchoResolvedConfig } from "./types.js";
 import { consumePreparedJobCompany, setPreparedJobCompany } from "./state.js";
 import {
   initializeMemory,
@@ -22,11 +23,10 @@ import {
   loadMigrationJobStatusData,
   loadMigrationPreviewData,
   probePromptContext,
+  repairMappings,
   replayIssue,
-  scanMigrationSources,
   searchMemory,
   syncIssue,
-  importMigrationPreview,
 } from "./sync.js";
 
 function requireString(value: unknown, field: string): string {
@@ -41,9 +41,15 @@ function inferIssueId(params: Record<string, unknown>, runCtx?: Partial<ToolRunC
   return null;
 }
 
+function maybeBootstrapLocalHonchoConfig(config: HonchoResolvedConfig): void {
+  if (!config.useLocalHonchoConfig || !config.bootstrapLocalHonchoConfig || !config.honchoApiKey) return;
+  bootstrapLocalHonchoConfig({ apiKey: config.honchoApiKey, baseUrl: config.honchoApiBaseUrl });
+}
+
 const plugin = definePlugin({
   async setup(ctx) {
     const initialConfig = await getResolvedConfig(ctx);
+    maybeBootstrapLocalHonchoConfig(initialConfig);
     for (const launcher of RUNTIME_LAUNCHERS) {
       ctx.launchers.register(launcher);
     }
@@ -99,6 +105,15 @@ const plugin = definePlugin({
 
     ctx.actions.register(ACTION_KEYS.initializeMemoryForCompany, async (params) => {
       const companyId = requireString(params.companyId, "companyId");
+      // Ensure workspace/peer/session mappings here, inside the action call,
+      // rather than only inside the initialize-memory job. Paperclip's job dispatch
+      // (runJob) never registers a company-scoped invocation with the host
+      // (unlike performAction), so a job-only fix is racy: any per-company
+      // host call it makes only succeeds if nothing else happens to be
+      // concurrently active in this plugin's worker process at that instant.
+      // Actions are properly scoped, so doing the critical repair here makes
+      // it reliable regardless of what else the worker is doing.
+      await repairMappings(ctx, companyId);
       await setPreparedJobCompany(ctx, JOB_KEYS.initializeMemory, companyId);
       return { ok: true, companyId };
     });
@@ -117,20 +132,6 @@ const plugin = definePlugin({
         ?? (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id;
       if (!companyId) throw new Error("No company available to initialize memory");
       await initializeMemory(ctx, companyId);
-    });
-
-    ctx.jobs.register(JOB_KEYS.migrationScan, async () => {
-      const companies = await ctx.companies.list({ limit: 1, offset: 0 });
-      const companyId = companies[0]?.id;
-      if (!companyId) throw new Error("No company available to scan migration sources");
-      await scanMigrationSources(ctx, companyId);
-    });
-
-    ctx.jobs.register(JOB_KEYS.migrationImport, async () => {
-      const companies = await ctx.companies.list({ limit: 1, offset: 0 });
-      const companyId = companies[0]?.id;
-      if (!companyId) throw new Error("No company available to import migration sources");
-      await importMigrationPreview(ctx, companyId);
     });
 
     ctx.events.on("issue.created", async (event) => {
@@ -404,6 +405,10 @@ const plugin = definePlugin({
 
   async onValidateConfig(config) {
     return validateConfig(config);
+  },
+
+  async onConfigChanged(newConfig) {
+    maybeBootstrapLocalHonchoConfig(resolveConfig(newConfig));
   },
 });
 

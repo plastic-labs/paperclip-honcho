@@ -11,7 +11,7 @@ import {
   systemPeerId,
   workspaceIdForCompany,
 } from "./ids.js";
-import type { HonchoActor, LineageRecord, MigrationPreview } from "./types.js";
+import type { HonchoActor, MigrationPreview } from "./types.js";
 
 type EntityType = (typeof ENTITY_TYPES)[keyof typeof ENTITY_TYPES];
 
@@ -38,6 +38,17 @@ async function upsertEntity(
   });
 }
 
+// Defensive wrapper around ctx.entities.list(): some Paperclip host versions
+// return null instead of [] for certain queries (observed live against a
+// real instance). Guard every call site so a host quirk can't crash the
+// plugin worker.
+async function listPluginEntities(
+  ctx: PluginContext,
+  params: Parameters<PluginContext["entities"]["list"]>[0],
+) {
+  return (await ctx.entities.list(params)) ?? [];
+}
+
 export async function upsertWorkspaceMapping(
   ctx: PluginContext,
   company: Company | null,
@@ -46,6 +57,11 @@ export async function upsertWorkspaceMapping(
   status: "created" | "existing" | "mapped" = "mapped",
   workspaceId?: string,
 ) {
+  // Once a company has a mapped workspace, that id is canonical forever: it
+  // must never be recomputed from the company's current name/prefix, or a
+  // rename would silently redirect future syncs at a brand-new Honcho
+  // workspace and orphan everything (peers, conclusions, dreams) already
+  // accumulated under the old one.
   const existing = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof existing?.data.workspaceId === "string" && existing.data.workspaceId.trim()
     ? existing.data.workspaceId
@@ -151,7 +167,7 @@ export async function upsertAgentPeerMapping(
   agent: Agent,
   status: "mapped" | "missing" = "mapped",
 ) {
-  const peerId = peerIdForAgent(agent.id, agent.name);
+  const peerId = await resolveCanonicalAgentPeerId(ctx, companyId, agent);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -282,27 +298,8 @@ export async function upsertImportLedger(
   });
 }
 
-export async function upsertAgentLineage(
-  ctx: PluginContext,
-  companyId: string,
-  record: LineageRecord,
-) {
-  return await upsertEntity(ctx, {
-    entityType: ENTITY_TYPES.agentLineage,
-    scopeKind: "company",
-    scopeId: companyId,
-    externalId: `paperclip:run-lineage:${record.parentRunId}:${record.childRunId}`,
-    title: `${record.parentAgentId} -> ${record.childAgentId}`,
-    status: "mapped",
-    data: {
-      ...record,
-      updatedAt: new Date().toISOString(),
-    },
-  });
-}
-
 export async function getImportLedgerRecord(ctx: PluginContext, companyId: string, externalId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.importLedger,
     scopeKind: "company",
     scopeId: companyId,
@@ -313,7 +310,7 @@ export async function getImportLedgerRecord(ctx: PluginContext, companyId: strin
 }
 
 export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.workspaceMapping,
     scopeKind: "company",
     scopeId: companyId,
@@ -324,11 +321,22 @@ export async function getWorkspaceMappingRecord(ctx: PluginContext, companyId: s
 }
 
 export async function getSessionMappingRecord(ctx: PluginContext, issueId: string) {
-  const records = await ctx.entities.list({
+  const records = await listPluginEntities(ctx, {
     entityType: ENTITY_TYPES.sessionMapping,
     scopeKind: "issue",
     scopeId: issueId,
     externalId: `paperclip:issue:${issueId}`,
+    limit: 1,
+  });
+  return records[0] ?? null;
+}
+
+export async function getAgentPeerMappingRecord(ctx: PluginContext, companyId: string, agentId: string) {
+  const records = await listPluginEntities(ctx, {
+    entityType: ENTITY_TYPES.peerMapping,
+    scopeKind: "company",
+    scopeId: companyId,
+    externalId: `paperclip:agent:${agentId}`,
     limit: 1,
   });
   return records[0] ?? null;
@@ -339,21 +347,22 @@ export async function resolveCanonicalWorkspaceId(
   companyId: string,
   workspacePrefix: string,
 ) {
-  const company = await ctx.companies.get(companyId);
-  const expectedWorkspaceId = workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
     ? mapping.data.workspaceId
     : null;
-  if (mappedWorkspaceId) {
-    if (mappedWorkspaceId !== expectedWorkspaceId) {
-      throw new Error(
-        `Workspace mapping mismatch for company '${companyId}': mapped workspace '${mappedWorkspaceId}' does not match expected workspace '${expectedWorkspaceId}'`,
-      );
-    }
-    return mappedWorkspaceId;
-  }
-  return expectedWorkspaceId;
+  if (mappedWorkspaceId) return mappedWorkspaceId;
+  const company = await ctx.companies.get(companyId);
+  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
+}
+
+export async function resolveCanonicalAgentPeerId(ctx: PluginContext, companyId: string, agent: Agent) {
+  const mapping = await getAgentPeerMappingRecord(ctx, companyId, agent.id);
+  const mappedPeerId = typeof mapping?.data.peerId === "string" && mapping.data.peerId.trim()
+    ? mapping.data.peerId
+    : null;
+  if (mappedPeerId) return mappedPeerId;
+  return peerIdForAgent(agent.id, agent.name);
 }
 
 export async function resolveCanonicalIssueSessionId(
@@ -412,18 +421,18 @@ export async function upsertFileImportSource(
 
 export async function listMappingCounts(ctx: PluginContext, companyId: string) {
   const [peers, sessions, ledger] = await Promise.all([
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.peerMapping,
       scopeKind: "company",
       scopeId: companyId,
       limit: 500,
     }),
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.sessionMapping,
       scopeKind: "issue",
       limit: 500,
     }),
-    ctx.entities.list({
+    listPluginEntities(ctx, {
       entityType: ENTITY_TYPES.importLedger,
       scopeKind: "company",
       scopeId: companyId,
@@ -431,13 +440,18 @@ export async function listMappingCounts(ctx: PluginContext, companyId: string) {
     }),
   ]);
 
+  // Some Paperclip host versions don't apply scopeKind/scopeId filters to
+  // entities.list queries server-side (observed live), so filter by scope
+  // client-side too — otherwise these counts silently include every other
+  // company's rows on a multi-company instance.
+  const companyLedger = ledger.filter((record) => record.scopeId === companyId);
   return {
-    mappedPeers: peers.length,
+    mappedPeers: peers.filter((record) => record.scopeId === companyId).length,
     mappedSessions: sessions.filter((record) => record.data.companyId === companyId).length,
-    importedComments: ledger.filter((record) => record.data.sourceType === "issue_comment").length,
-    importedDocuments: ledger.filter((record) => record.data.sourceType === "issue_document").length,
-    importedRuns: ledger.filter((record) => record.data.sourceType === "run_transcript").length,
-    importedFiles: ledger.filter((record) => String(record.data.sourceType).includes("file")).length,
+    importedComments: companyLedger.filter((record) => record.data.sourceType === "issue_comment").length,
+    importedDocuments: companyLedger.filter((record) => record.data.sourceType === "issue_document").length,
+    importedRuns: companyLedger.filter((record) => record.data.sourceType === "run_transcript").length,
+    importedFiles: companyLedger.filter((record) => String(record.data.sourceType).includes("file")).length,
   };
 }
 

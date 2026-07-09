@@ -1,7 +1,8 @@
 import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-sdk";
-import { DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
+import { DEFAULT_BACKFILL_BATCH_SIZE, DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
-import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
+import { readLocalHonchoConfig } from "./local-honcho-config.js";
+import { resolveCanonicalAgentPeerId, resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
 import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {
   AskPeerParams,
@@ -175,6 +176,7 @@ export class HonchoClient {
   private readonly ensuredPeers = new Set<string>();
   private readonly resolvedWorkspaceIds = new Map<string, string>();
   private readonly resolvedSessionIds = new Map<string, string>();
+  private readonly resolvedAgentPeerIds = new Map<string, string>();
 
   constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
@@ -209,8 +211,17 @@ export class HonchoClient {
   }
 
   private async agentPeerId(companyId: string, agentId: string): Promise<string> {
+    const cacheKey = `${companyId}:${agentId}`;
+    const cachedPeerId = this.resolvedAgentPeerIds.get(cacheKey);
+    if (cachedPeerId) {
+      return cachedPeerId;
+    }
     const agent = await this.ctx.agents.get(agentId, companyId);
-    return peerIdForAgent(agentId, agent?.name ?? null);
+    const peerId = agent
+      ? await resolveCanonicalAgentPeerId(this.ctx, companyId, agent)
+      : peerIdForAgent(agentId, null);
+    this.resolvedAgentPeerIds.set(cacheKey, peerId);
+    return peerId;
   }
 
   async ensureWorkspace(companyId: string): Promise<string> {
@@ -278,9 +289,11 @@ export class HonchoClient {
   }
 
   async ensureAgentPeer(companyId: string, agent: Agent): Promise<string> {
+    const peerId = await resolveCanonicalAgentPeerId(this.ctx, companyId, agent);
+    this.resolvedAgentPeerIds.set(`${companyId}:${agent.id}`, peerId);
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id, agent.name),
+      peerId,
       {
         company_id: companyId,
         agent_id: agent.id,
@@ -409,7 +422,7 @@ export class HonchoClient {
         this.ctx,
         this.config,
         this.apiKey,
-        `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/list?page=${page}&size=200`,
+        `${HONCHO_V3_PATH}/workspaces/${encodeURIComponent(workspaceId)}/sessions/${encodeURIComponent(sessionId)}/messages/list?page=${page}&size=${DEFAULT_BACKFILL_BATCH_SIZE}`,
         {
           method: "POST",
           body: JSON.stringify({}),
@@ -514,18 +527,15 @@ export class HonchoClient {
 
   async searchMemory(companyId: string, agentId: string, params: SearchMemoryParams): Promise<HonchoSearchResult[]> {
     const agent = await this.ctx.agents.get(agentId, companyId);
-    const agentPeerId = peerIdForAgent(agentId, agent?.name ?? null);
-    if (agent) {
-      await this.ensureAgentPeer(companyId, agent);
-    } else {
-      await this.ensurePeer(companyId, agentPeerId, {
+    const agentPeerId = agent
+      ? await this.ensureAgentPeer(companyId, agent)
+      : await this.ensurePeer(companyId, peerIdForAgent(agentId, null), {
         company_id: companyId,
         agent_id: agentId,
       }, {
         observe_me: this.config.observe_me,
         observe_others: this.config.observe_others,
       });
-    }
     const workspaceId = await this.workspaceId(companyId);
     const scopedSessionId = params.scope === "workspace"
       ? undefined
@@ -589,8 +599,62 @@ export class HonchoClient {
 }
 
 export async function createHonchoClient(input: HonchoClientInput): Promise<HonchoClient> {
-  const apiKey = input.config.honchoApiKey
-    ? await input.ctx.secrets.resolve(input.config.honchoApiKey)
-    : null;
-  return new HonchoClient({ ...input, apiKey });
+  let apiKey: string | null = null;
+  let source = "none";
+  let baseUrl = input.config.honchoApiBaseUrl;
+
+  // Primary path: a literal key entered directly into the plugin's own
+  // config. Paperclip's plugin secret-ref system (ctx.secrets.resolve) is
+  // fail-closed platform-wide as of v2026.707.0 pending company-scoped
+  // plugin config, so we treat this field as a plain value rather than
+  // routing it through that dead RPC.
+  const configured = input.config.honchoApiKey?.trim();
+  if (configured) {
+    apiKey = configured;
+    source = "config";
+  }
+
+  // Env var fallback: lets an operator set this once on the plugin worker's
+  // own process instead of through the UI — the same convention the
+  // platform's first-party sandbox provider plugins use for their API keys
+  // (e.g. DAYTONA_API_KEY, E2B_API_KEY).
+  if (!apiKey) {
+    const envApiKey = process.env.HONCHO_API_KEY?.trim();
+    if (envApiKey) {
+      apiKey = envApiKey;
+      source = "env";
+      const envBaseUrl = process.env.HONCHO_API_BASE_URL?.trim();
+      if (envBaseUrl && isHonchoCloudBaseUrl(input.config.honchoApiBaseUrl)) {
+        baseUrl = envBaseUrl;
+      }
+    }
+  }
+
+  // Local fallback (on by default): reuse the shared Honcho config used by
+  // Hermes / Claude Code (~/.honcho/config.json). Only consulted when no key
+  // was found above, so an explicitly configured key or env var always wins.
+  // Can be turned off via useLocalHonchoConfig to force a keyless/self-hosted setup.
+  if (!apiKey && input.config.useLocalHonchoConfig) {
+    const local = readLocalHonchoConfig();
+    if (local) {
+      if (local.apiKey) {
+        apiKey = local.apiKey;
+        source = "local-honcho-config";
+      }
+      // Pair the shared config's base URL with its credentials as a unit — a
+      // self-hosted key belongs to a self-hosted instance, not the cloud
+      // default. An explicitly-configured (non-default) Paperclip base URL still
+      // wins, mirroring the key precedence above.
+      if (local.baseUrl && isHonchoCloudBaseUrl(input.config.honchoApiBaseUrl)) {
+        baseUrl = local.baseUrl;
+      }
+    }
+  }
+
+  const config = baseUrl === input.config.honchoApiBaseUrl
+    ? input.config
+    : { ...input.config, honchoApiBaseUrl: baseUrl };
+
+  input.ctx.logger.info("Honcho API key resolved", { source, hasKey: Boolean(apiKey), baseUrl });
+  return new HonchoClient({ ...input, config, apiKey });
 }

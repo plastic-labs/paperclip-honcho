@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { peerIdForAgent, workspaceIdForCompany } from "../src/ids.js";
-import { setMigrationCandidatesLoaderForTests } from "../src/sync.js";
+import { importMigrationPreview, scanMigrationSources, setMigrationCandidatesLoaderForTests } from "../src/sync.js";
 import plugin from "../src/worker.js";
 import { createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
 
@@ -86,7 +86,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("fails closed when a stored workspace mapping points at a different workspace", async () => {
+  it("keeps syncing to a previously stored workspace even after the configured prefix changes", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -110,13 +110,12 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await expect(harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" })).rejects.toThrow(
-      `mapped workspace 'paperclip_co_1' does not match expected workspace '${companyWorkspaceId}'`,
-    );
+    await harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" });
 
-    expect(requestsMatching(requests, "/peers")).toHaveLength(0);
-    expect(requestsMatching(requests, "/sessions")).toHaveLength(0);
-    expect(requestsMatching(requests, "/messages")).toHaveLength(0);
+    // The stored mapping is canonical forever: a config/company-name change
+    // must never redirect existing sync traffic at a different workspace.
+    expect(requestsMatching(requests, "/workspaces/paperclip_co_1/")).not.toHaveLength(0);
+    expect(requestsMatching(requests, `/workspaces/${companyWorkspaceId}/`)).toHaveLength(0);
   });
 
   it("initialize-memory works against self-hosted Honcho without an API key secret", async () => {
@@ -173,7 +172,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("migration-scan");
+    await scanMigrationSources(harness.ctx, "co_1");
 
     const preview = await harness.getData<Record<string, unknown>>("migration-preview", {
       companyId: "co_1",
@@ -218,8 +217,8 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("migration-scan");
-    await harness.runJob("migration-import");
+    await scanMigrationSources(harness.ctx, "co_1");
+    await importMigrationPreview(harness.ctx, "co_1");
 
     const importLedger = await harness.ctx.entities.list({
       entityType: "honcho-import-ledger",
@@ -277,8 +276,8 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("migration-scan");
-    await harness.runJob("migration-import");
+    await scanMigrationSources(harness.ctx, "co_1");
+    await importMigrationPreview(harness.ctx, "co_1");
 
     const importLedger = await harness.ctx.entities.list({
       entityType: "honcho-import-ledger",
@@ -362,10 +361,10 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("migration-scan");
-    await harness.runJob("migration-import");
+    await scanMigrationSources(harness.ctx, "co_1");
+    await importMigrationPreview(harness.ctx, "co_1");
     const messageRequestsAfterFirstImport = requestsMatching(requests, "/messages").length;
-    await harness.runJob("migration-import");
+    await importMigrationPreview(harness.ctx, "co_1");
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -406,7 +405,7 @@ describe("honcho memory jobs", () => {
 
     expect(requestsMatching(requests, "/messages")).toHaveLength(1);
 
-    await harness.runJob("migration-scan");
+    await scanMigrationSources(harness.ctx, "co_1");
 
     const preview = await harness.getData<Record<string, unknown>>("migration-preview", {
       companyId: "co_1",
@@ -420,7 +419,7 @@ describe("honcho memory jobs", () => {
       estimatedMessages: 0,
     });
 
-    await harness.runJob("migration-import");
+    await importMigrationPreview(harness.ctx, "co_1");
 
     expect(requestsMatching(requests, "/messages")).toHaveLength(1);
   });
@@ -445,6 +444,77 @@ describe("honcho memory jobs", () => {
         agent_name: "Agent One",
       }),
     });
+  });
+
+  it("keeps an agent's peer id stable after the agent is renamed", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const renamedAgentPeerId = peerIdForAgent("agent_1", "Renamed Agent");
+    expect(renamedAgentPeerId).not.toBe(firstAgentPeerId);
+
+    harness.seed({
+      agents: [{
+        ...(await harness.ctx.agents.get("agent_1", "co_1"))!,
+        name: "Renamed Agent",
+      }],
+    });
+
+    await harness.runJob("initialize-memory");
+
+    expect(requestsMatching(requests, "/peers").some((request) => request.body?.id === renamedAgentPeerId)).toBe(false);
+    const peerMappings = await harness.ctx.entities.list({
+      entityType: "honcho-peer-mapping",
+      scopeKind: "company",
+      scopeId: "co_1",
+      externalId: "paperclip:agent:agent_1",
+    });
+    expect(peerMappings[0]?.data).toMatchObject({ peerId: firstAgentPeerId });
+  });
+
+  it("imports a source exactly once even when the candidate list is duplicated and the ledger is unavailable", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    // Simulate the real failure mode: the per-job invocation scope makes the
+    // import ledger unavailable (reads empty, writes throw), so the ledger
+    // cannot dedup. Everything else (Honcho appends, session provenance) works.
+    const realList = harness.ctx.entities.list.bind(harness.ctx.entities);
+    const realUpsert = harness.ctx.entities.upsert.bind(harness.ctx.entities);
+    harness.ctx.entities.list = (async (params: Parameters<typeof realList>[0]) =>
+      params.entityType === "honcho-import-ledger" ? [] : realList(params)) as typeof realList;
+    harness.ctx.entities.upsert = (async (input: Parameters<typeof realUpsert>[0]) => {
+      if (input.entityType === "honcho-import-ledger") throw new Error("invocation scope expired");
+      return realUpsert(input);
+    }) as typeof realUpsert;
+
+    // The same comment appears twice in the candidate list (e.g. a host that
+    // repeats issue-list pages). It must still import exactly once.
+    const comment = {
+      sourceType: "issue_comments" as const,
+      issueId: "iss_1",
+      issueIdentifier: "PAP-1",
+      sourceId: "c_dup",
+      fingerprint: "fp_c_dup",
+      authorType: "user" as const,
+      authorId: "user_1",
+      createdAt: new Date("2026-03-15T12:05:00.000Z").toISOString(),
+      content: "A duplicated historical comment that must import exactly once.",
+      title: "PAP-1",
+      metadata: { commentId: "c_dup", issueId: "iss_1", companyId: "co_1" },
+    };
+    setMigrationCandidatesLoaderForTests(async () => [comment, { ...comment }]);
+
+    await plugin.definition.setup(harness.ctx);
+    await importMigrationPreview(harness.ctx, "co_1");
+
+    const appendedMessages = requestsMatching(requests, "/messages")
+      .filter((request) => Array.isArray(request.body?.messages))
+      .reduce((total, request) => total + (request.body!.messages as unknown[]).length, 0);
+    expect(appendedMessages).toBe(1);
   });
 
   it("migration-import maps agent profile files to agent peers instead of owner peers", async () => {
@@ -472,7 +542,7 @@ describe("honcho memory jobs", () => {
     }]);
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("migration-import");
+    await importMigrationPreview(harness.ctx, "co_1");
 
     const peerMappings = await harness.ctx.entities.list({
       entityType: "honcho-peer-mapping",
@@ -561,7 +631,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("initialize-memory fails before writing into a mismatched stored workspace", async () => {
+  it("initialize-memory never migrates an existing stored workspace mapping", async () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -585,9 +655,7 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await expect(harness.runJob("initialize-memory")).rejects.toThrow(
-      `mapped workspace 'paperclip_co_1' does not match expected workspace '${companyWorkspaceId}'`,
-    );
+    await harness.runJob("initialize-memory");
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",
@@ -595,19 +663,21 @@ describe("honcho memory jobs", () => {
       scopeId: "co_1",
       externalId: "paperclip:company:co_1",
     });
+    // A company rename or a workspacePrefix config change must never redirect
+    // an already-established mapping to a different Honcho workspace, or the
+    // company's accumulated memory under the old id becomes unreachable.
     expect(workspaceMappings[0]?.data).toMatchObject({
       workspaceId: "paperclip_co_1",
       workspacePrefix: "paperclip",
     });
+    expect(workspaceMappings[0]?.data.workspaceId).not.toBe(companyWorkspaceId);
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
     });
     expect(status.companyStatus).toMatchObject({
-      initializationStatus: "failed",
-      lastError: expect.objectContaining({
-        message: expect.stringContaining("mapped workspace 'paperclip_co_1' does not match expected workspace"),
-      }),
+      initializationStatus: "complete",
+      lastError: null,
     });
   });
 });

@@ -77,10 +77,6 @@ export function fileExternalId(workspaceId: string, relativePath: string): strin
   return `paperclip:file:${workspaceId}:${hashId(relativePath)}`;
 }
 
-export function fileRevisionExternalId(workspaceId: string, relativePath: string, content: string): string {
-  return `${fileExternalId(workspaceId, relativePath)}:rev:${hashId(content)}`;
-}
-
 export function issueEntityUrl(issue: Pick<Issue, "id" | "identifier">): string {
   return `/issues/${issue.identifier ?? issue.id}`;
 }

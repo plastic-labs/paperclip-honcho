@@ -1,5 +1,5 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
-import { DEFAULT_CONFIG, JOB_KEYS, ACTION_KEYS, DATA_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES, PLUGIN_VERSION } from "./constants.js";
+import { DEFAULT_CONFIG, JOB_KEYS, EXPORT_NAMES, SLOT_IDS, TOOL_NAMES, PLUGIN_VERSION } from "./constants.js";
 
 const PLUGIN_ID = "honcho-ai.paperclip-honcho";
 
@@ -25,7 +25,6 @@ const manifest: PaperclipPluginManifestV1 = {
     "jobs.schedule",
     "agent.tools.register",
     "http.outbound",
-    "secrets.read-ref",
     "instance.settings.register",
     "ui.detailTab.register",
     "ui.action.register",
@@ -41,7 +40,7 @@ const manifest: PaperclipPluginManifestV1 = {
       honchoApiKey: {
         type: "string",
         title: "Honcho API Key",
-        format: "secret-ref",
+        description: "Paste your Honcho API key directly. If left blank, the plugin falls back to a HONCHO_API_KEY environment variable on the worker process, then to the shared ~/.honcho/config.json used by Hermes/Claude Code/opencode.",
         default: DEFAULT_CONFIG.honchoApiKey,
       },
       workspacePrefix: {
@@ -63,6 +62,12 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "boolean",
         title: "Inject Honcho Prompt Context",
         default: DEFAULT_CONFIG.enablePromptContext,
+      },
+      agentRuntimeHomePathTemplate: {
+        type: "string",
+        title: "Agent Runtime Home Path Template",
+        description: "Absolute path template for this company's Codex CLI runtime home (e.g. /path/to/.paperclip/instances/default/companies/{companyId}/codex-home), with {companyId} substituted automatically. When set, clicking \"Initialize Honcho memory\" writes a small MCP bridge script here and registers it in that home's config.toml, so agents can call this plugin's Honcho tools on demand instead of only receiving pushed context. Leave blank to disable. Machine-specific; only applies to Codex-based agents on this host.",
+        default: DEFAULT_CONFIG.agentRuntimeHomePathTemplate,
       },
       enablePeerChat: {
         type: "boolean",
@@ -100,6 +105,18 @@ const manifest: PaperclipPluginManifestV1 = {
         title: "Flush Before Reset",
         default: DEFAULT_CONFIG.flushBeforeReset,
       },
+      useLocalHonchoConfig: {
+        type: "boolean",
+        title: "Use Local Honcho Config",
+        description: "On by default: reuse the shared local Honcho config (~/.honcho/config.json, as used by Hermes and Claude Code) for the API key when no key is configured above or via HONCHO_API_KEY. Applies to self-hosted/local Paperclip. Turn off to force a keyless or explicitly-configured-only setup.",
+        default: DEFAULT_CONFIG.useLocalHonchoConfig,
+      },
+      bootstrapLocalHonchoConfig: {
+        type: "boolean",
+        title: "Bootstrap Local Honcho Config",
+        description: "Off by default: when a Honcho API key is configured above, write it to ~/.honcho/config.json if that file doesn't already exist, so Hermes/Claude Code/opencode on this box can reuse it too. Never overwrites an existing file. Only makes sense for a single-tenant, self-hosted Paperclip instance running on the same machine.",
+        default: DEFAULT_CONFIG.bootstrapLocalHonchoConfig,
+      },
     },
   },
   entrypoints: {
@@ -111,16 +128,6 @@ const manifest: PaperclipPluginManifestV1 = {
       jobKey: JOB_KEYS.initializeMemory,
       displayName: "Initialize Memory",
       description: "Connects Honcho, creates core mappings, imports baseline issue memory, and verifies manual prompt previews.",
-    },
-    {
-      jobKey: JOB_KEYS.migrationScan,
-      displayName: "Scan Migration Sources",
-      description: "Scans issue comments and issue documents and writes an import preview.",
-    },
-    {
-      jobKey: JOB_KEYS.migrationImport,
-      displayName: "Import Historical Memory",
-      description: "Imports the approved historical Paperclip issue memory preview into Honcho with idempotent ledger checks.",
     },
   ],
   tools: [
@@ -274,7 +281,4 @@ const manifest: PaperclipPluginManifestV1 = {
   },
 };
 
-export const HONCHO_DATA_KEYS = DATA_KEYS;
-export const HONCHO_ACTION_KEYS = ACTION_KEYS;
-export const HONCHO_JOB_KEYS = JOB_KEYS;
 export default manifest;

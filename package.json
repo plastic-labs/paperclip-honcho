@@ -17,7 +17,7 @@
     "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4178",
     "test": "vitest run --config ./vitest.config.ts",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepare": "npm run build"
   },
   "paperclipPlugin": {
     "manifest": "./dist/manifest.js",
@@ -43,7 +43,7 @@
   "author": "Plastic Labs",
   "license": "MIT",
   "dependencies": {
-    "@paperclipai/plugin-sdk": "^2026.416.0"
+    "@paperclipai/plugin-sdk": "^2026.618.0"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.0",

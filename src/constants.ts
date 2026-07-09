@@ -5,7 +5,6 @@ export const PLUGIN_VERSION = "0.1.2";
 export const STATE_NAMESPACE = "honcho";
 export const DEFAULT_WORKSPACE_PREFIX = "paperclip";
 export const HONCHO_V3_PATH = "/v3";
-export const HONCHO_CONNECTION_PROBE_PATH = `${HONCHO_V3_PATH}/workspaces`;
 export const DEFAULT_CONTEXT_SUMMARY_LIMIT = 3;
 export const DEFAULT_CONTEXT_TOKEN_LIMIT = 2000;
 export const DEFAULT_SEARCH_LIMIT = 5;
@@ -13,39 +12,9 @@ export const DEFAULT_MAX_INGEST_MESSAGE_CHARS = 2000;
 export const DEFAULT_DOCUMENT_SECTION_SIZE = 1800;
 export const DEFAULT_DOCUMENT_SECTION_OVERLAP = 200;
 export const DEFAULT_BACKFILL_BATCH_SIZE = 100;
-export const DEFAULT_MAX_WORKSPACE_FILE_BYTES = 64 * 1024;
 export const DEFAULT_MIN_IMPORT_TEXT_LENGTH = 12;
-export const DEFAULT_FILE_SCAN_LIMIT = 100;
-export const DEFAULT_FILE_SCAN_MAX_DEPTH = 4;
-export const DEFAULT_SUMMARIZED_SEARCH_LIMIT = 3;
 export const DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
 export const DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 750;
-
-export const LEGACY_ROOT_FILES = [
-  "USER.md",
-  "MEMORY.md",
-  "IDENTITY.md",
-  "SOUL.md",
-  "AGENTS.md",
-  "TOOLS.md",
-  "BOOTSTRAP.md",
-] as const;
-
-export const LEGACY_DIRECTORY_ROOTS = [
-  "memory",
-  "canvas",
-] as const;
-
-export const FILE_IMPORT_PRIORITY = [
-  "USER.md",
-  "MEMORY.md",
-  "SOUL.md",
-  "IDENTITY.md",
-  "AGENTS.md",
-  "TOOLS.md",
-  "memory",
-  "canvas",
-] as const;
 
 export const DEFAULT_NOISE_PATTERNS = [
   "^HEARTBEAT_OK$",
@@ -84,8 +53,6 @@ export const ACTION_KEYS = {
 
 export const JOB_KEYS = {
   initializeMemory: "initialize-memory",
-  migrationScan: "migration-scan",
-  migrationImport: "migration-import",
 } as const;
 
 export const TOOL_NAMES = {
@@ -106,7 +73,6 @@ export const ENTITY_TYPES = {
   sessionMapping: "honcho-session-mapping",
   importLedger: "honcho-import-ledger",
   migrationReport: "honcho-migration-report",
-  agentLineage: "honcho-agent-lineage",
   fileImportSource: "honcho-file-import-source",
   runtimeFlushCheckpoint: "honcho-runtime-flush-checkpoint",
 } as const;
@@ -140,6 +106,9 @@ export const DEFAULT_CONFIG = {
   disableDefaultNoisePatterns: false,
   stripPlatformMetadata: true,
   flushBeforeReset: false,
+  useLocalHonchoConfig: true,
+  bootstrapLocalHonchoConfig: false,
+  agentRuntimeHomePathTemplate: "",
 } as const;
 
 export const ISSUE_STATUS_STATE_KEY = "issue-sync-status";

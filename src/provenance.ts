@@ -64,62 +64,6 @@ export function buildDocumentProvenance(
   };
 }
 
-export function buildRunProvenance(
-  issue: Pick<Issue, "id" | "identifier" | "companyId">,
-  input: {
-    runId: string;
-    authorType: HonchoActor["authorType"];
-    authorId: string;
-  },
-): HonchoProvenance {
-  return {
-    sourceSystem: "paperclip",
-    companyId: issue.companyId,
-    issueId: issue.id,
-    runId: input.runId,
-    commentId: null,
-    documentRevisionId: null,
-    authorType: input.authorType,
-    authorId: input.authorId,
-    paperclipEntityUrl: issueEntityUrl(issue),
-    paperclipIssueIdentifier: issue.identifier ?? null,
-    ingestedAt: new Date().toISOString(),
-    contentType: "run_transcript_chunk",
-  };
-}
-
-export function buildFileProvenance(input: {
-  companyId: string;
-  workspaceId: string;
-  projectId: string;
-  relativePath: string;
-  authorType: HonchoActor["authorType"];
-  authorId: string;
-  contentType: HonchoProvenance["contentType"];
-  sourceCategory: string;
-  importMode: "bootstrap" | "migration" | "resync";
-}) {
-  return {
-    sourceSystem: "paperclip" as const,
-    companyId: input.companyId,
-    issueId: `workspace:${input.workspaceId}`,
-    runId: null,
-    commentId: null,
-    documentRevisionId: null,
-    authorType: input.authorType,
-    authorId: input.authorId,
-    paperclipEntityUrl: `/projects/${input.projectId}`,
-    paperclipIssueIdentifier: null,
-    ingestedAt: new Date().toISOString(),
-    contentType: input.contentType,
-    workspaceId: input.workspaceId,
-    projectId: input.projectId,
-    relativePath: input.relativePath,
-    sourceCategory: input.sourceCategory,
-    importMode: input.importMode,
-  };
-}
-
 export function splitDocumentIntoSections(document: IssueDocumentRef, revision: DocumentRevision, sectionSize: number, overlap: number) {
   const body = revision.body;
   if (!body.trim()) return [];

@@ -18,6 +18,7 @@ const EMPTY_ISSUE_STATUS: IssueSyncStatus = {
   lastSyncedCommentCreatedAt: null,
   lastSyncedDocumentRevisionKey: null,
   lastSyncedDocumentRevisionId: null,
+  syncedDocumentRevisions: {},
   lastSyncedRunId: null,
   lastSyncedRunFinishedAt: null,
   lastBackfillAt: null,

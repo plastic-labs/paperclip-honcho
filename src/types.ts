@@ -3,8 +3,6 @@ import type {
   Issue,
   IssueComment,
   PluginContext,
-  ScopeKey,
-  ToolRunContext,
 } from "@paperclipai/plugin-sdk";
 
 export type HonchoPluginConfig = {
@@ -25,6 +23,9 @@ export type HonchoPluginConfig = {
   disableDefaultNoisePatterns?: boolean;
   stripPlatformMetadata?: boolean;
   flushBeforeReset?: boolean;
+  useLocalHonchoConfig?: boolean;
+  bootstrapLocalHonchoConfig?: boolean;
+  agentRuntimeHomePathTemplate?: string;
 };
 
 export type HonchoResolvedConfig = {
@@ -41,6 +42,9 @@ export type HonchoResolvedConfig = {
   disableDefaultNoisePatterns: boolean;
   stripPlatformMetadata: boolean;
   flushBeforeReset: boolean;
+  useLocalHonchoConfig: boolean;
+  bootstrapLocalHonchoConfig: boolean;
+  agentRuntimeHomePathTemplate: string;
 };
 
 export type MigrationSourceType =
@@ -67,6 +71,11 @@ export type IssueSyncStatus = {
   lastSyncedCommentCreatedAt: string | null;
   lastSyncedDocumentRevisionKey: string | null;
   lastSyncedDocumentRevisionId: string | null;
+  // Per-document dedup cursor: document key -> the revision id last synced for
+  // that document. Unlike the single lastSyncedDocumentRevisionId (kept for
+  // display), this correctly tracks multiple independently-revised documents
+  // on one issue so an edit to one doc never re-syncs the others.
+  syncedDocumentRevisions?: Record<string, string>;
   lastSyncedRunId: string | null;
   lastSyncedRunFinishedAt: string | null;
   lastBackfillAt: string | null;
@@ -123,13 +132,6 @@ export type MigrationPreview = {
   estimatedMessages: number;
   warnings: string[];
   generatedAt: string;
-};
-
-export type MigrationImportSummary = {
-  commentsImported: number;
-  documentsImported: number;
-  skipped: number;
-  failed: number;
 };
 
 export type CompanyMemoryStatus = {
@@ -301,13 +303,6 @@ export type IssueMemoryStatusData = {
   };
 };
 
-export type SetupChecklistItem = {
-  key: string;
-  label: string;
-  done: boolean;
-  detail: string;
-};
-
 export type MemoryStatusData = {
   config: {
     honchoApiBaseUrl: string;
@@ -349,14 +344,6 @@ export type MigrationJobStatusData = {
   checkpoint: CompanyMemoryCheckpoint | null;
 };
 
-export type WorkspaceFileCandidate = {
-  workspaceId: string;
-  projectId: string;
-  path: string;
-  sizeBytes: number | null;
-  modifiedAt: string | null;
-};
-
 export type LegacyFileCategory = "legacy-user-memory" | "workspace-guidance" | "agent-profile";
 
 export type MigrationSourceCandidate = {
@@ -376,26 +363,10 @@ export type MigrationSourceCandidate = {
   sourceCategory?: LegacyFileCategory | null;
 };
 
-export type LineageRecord = {
-  companyId: string;
-  parentAgentId: string;
-  childAgentId: string;
-  parentPeerId: string;
-  childPeerId: string;
-  parentRunId: string;
-  childRunId: string;
-  parentIssueId: string | null;
-  childIssueId: string | null;
-  delegationDepth: number;
-  spawnedAt: string;
-};
-
 export type NormalizedMessage = {
   content: string;
   fingerprint: string;
 };
-
-export type WorkerActionParams = Record<string, unknown>;
 
 export type IssueDocumentRef = {
   id?: string;
@@ -450,12 +421,6 @@ export type SyncIssueResult = {
 
 export type RepairMappingsResult = {
   repaired: number;
-};
-
-export type ScopedStateInput = ScopeKey;
-
-export type HonchoToolRunContext = ToolRunContext & {
-  issueId?: string | null;
 };
 
 export type SyncableIssueResource = {

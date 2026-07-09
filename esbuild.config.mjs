@@ -4,12 +4,22 @@ import { createPluginBundlerPresets } from "@paperclipai/plugin-sdk/bundlers";
 const presets = createPluginBundlerPresets({ uiEntry: "src/ui/index.tsx" });
 const watch = process.argv.includes("--watch");
 
-const workerCtx = await esbuild.context(presets.esbuild.worker);
+// Keep the Paperclip SDK (and its peer deps) out of the published bundle so the
+// host resolves them from node_modules at runtime. This means SDK protocol
+// updates within the declared semver range are picked up on (re)install instead
+// of being frozen into dist/ at publish time.
+const runtimeExternal = ["@paperclipai/plugin-sdk", "@paperclipai/shared", "react", "react-dom"];
+
+const workerCtx = await esbuild.context({
+  ...presets.esbuild.worker,
+  external: runtimeExternal,
+});
 const workerBootstrapCtx = await esbuild.context({
   bundle: true,
   platform: "node",
   format: "esm",
   sourcemap: true,
+  external: runtimeExternal,
   entryPoints: ["src/worker-bootstrap.ts"],
   outfile: "dist/worker-bootstrap.js",
 });
@@ -19,6 +29,7 @@ const manifestCtx = await esbuild.context({
   bundle: true,
   platform: "node",
   format: "esm",
+  external: runtimeExternal,
   entryPoints: ["src/manifest.ts"],
   outfile: "dist/manifest.js",
 });
@@ -27,6 +38,7 @@ const constantsCtx = await esbuild.context({
   platform: "node",
   format: "esm",
   sourcemap: true,
+  external: runtimeExternal,
   entryPoints: ["src/constants.ts"],
   outfile: "dist/constants.js",
 });
