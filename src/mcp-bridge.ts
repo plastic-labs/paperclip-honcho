@@ -1,4 +1,5 @@
-import type { PluginContext } from "@paperclipai/plugin-sdk";
+import * as fs from "node:fs";
+import { join } from "node:path";
 import manifest from "./manifest.js";
 import { PLUGIN_ID } from "./constants.js";
 import type { HonchoResolvedConfig } from "./types.js";
@@ -8,7 +9,6 @@ import type { HonchoResolvedConfig } from "./types.js";
 // whatever was written the first time repairMappings ran.
 export const MCP_BRIDGE_VERSION = "2";
 
-export const AGENT_RUNTIME_FOLDER_KEY = "agent-runtime-home";
 export const BRIDGE_SCRIPT_FILENAME = "paperclip-honcho-mcp-bridge.cjs";
 const MCP_SERVER_KEY = "paperclip_honcho";
 const VERSION_MARKER_PREFIX = "# paperclip-honcho-mcp-bridge version:";
@@ -276,50 +276,68 @@ export type McpBridgeSyncResult =
   | { status: "synced" }
   | { status: "failed"; message: string };
 
+function readTextIfPresent(path: string): string | null {
+  try {
+    return fs.readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function writeTextAtomic(path: string, contents: string): void {
+  // Write to a sibling temp file then rename, so a reader (or a concurrent
+  // Codex launch) never observes a half-written file.
+  const tmpPath = `${path}.tmp-${process.pid}`;
+  fs.writeFileSync(tmpPath, contents);
+  fs.renameSync(tmpPath, path);
+}
+
 // Idempotent: safe to call on every repairMappings pass. Writes are skipped
 // when content already matches, and the config.toml block is replaced
 // wholesale (not blindly appended) keyed off the version marker, so
 // upgrading the plugin's bridge script never leaves a stale duplicate table
 // behind.
+//
+// Uses raw node:fs rather than the host's local.folders capability: the
+// worker is trusted code (it already writes ~/.honcho/config.json directly),
+// the target is an operator-configured, machine-specific path, and avoiding
+// the capability means installing this plugin upgrade never forces an
+// operator re-approval (adding a capability marks a plugin upgrade_pending).
 export async function syncAgentRuntimeMcpBridge(
-  ctx: PluginContext,
   companyId: string,
   config: HonchoResolvedConfig,
 ): Promise<McpBridgeSyncResult> {
   const template = config.agentRuntimeHomePathTemplate.trim();
   if (!template) return { status: "skipped" };
 
-  const targetPath = template.replaceAll("{companyId}", companyId);
+  const targetDir = template.replaceAll("{companyId}", companyId);
 
   try {
-    await ctx.localFolders.configure({
-      companyId,
-      folderKey: AGENT_RUNTIME_FOLDER_KEY,
-      path: targetPath,
-      access: "readWrite",
-    });
-
-    const status = await ctx.localFolders.status(companyId, AGENT_RUNTIME_FOLDER_KEY);
-    if (!status.healthy || !status.realPath) {
-      const message = status.problems.map((problem) => problem.message).join("; ") || "Agent runtime home is not ready.";
-      return { status: "failed", message };
+    // Require the runtime home to already exist: it is created and owned by
+    // Paperclip's Codex adapter on first run. If it's absent, the agent
+    // runtime isn't set up on this machine yet, so no-op rather than
+    // fabricate a home the CLI won't actually use.
+    let dirStat: fs.Stats;
+    try {
+      dirStat = fs.statSync(targetDir);
+    } catch {
+      return { status: "failed", message: `Agent runtime home does not exist: ${targetDir}` };
+    }
+    if (!dirStat.isDirectory()) {
+      return { status: "failed", message: `Agent runtime home path is not a directory: ${targetDir}` };
     }
 
+    const scriptPath = join(targetDir, BRIDGE_SCRIPT_FILENAME);
     const scriptSource = buildBridgeScriptSource();
-    const existingScript = await ctx.localFolders
-      .readText(companyId, AGENT_RUNTIME_FOLDER_KEY, BRIDGE_SCRIPT_FILENAME)
-      .catch(() => null);
-    if (existingScript !== scriptSource) {
-      await ctx.localFolders.writeTextAtomic(companyId, AGENT_RUNTIME_FOLDER_KEY, BRIDGE_SCRIPT_FILENAME, scriptSource);
+    if (readTextIfPresent(scriptPath) !== scriptSource) {
+      writeTextAtomic(scriptPath, scriptSource);
     }
 
-    const scriptAbsolutePath = `${status.realPath.replace(/\/+$/, "")}/${BRIDGE_SCRIPT_FILENAME}`;
-    const existingToml = await ctx.localFolders
-      .readText(companyId, AGENT_RUNTIME_FOLDER_KEY, "config.toml")
-      .catch(() => "");
-    const nextToml = `${stripExistingBridgeBlock(existingToml)}\n${buildBridgeTomlBlock(scriptAbsolutePath)}`;
+    const configPath = join(targetDir, "config.toml");
+    const existingToml = readTextIfPresent(configPath) ?? "";
+    const nextToml = `${stripExistingBridgeBlock(existingToml)}\n${buildBridgeTomlBlock(scriptPath)}`;
     if (nextToml.trim() !== existingToml.trim()) {
-      await ctx.localFolders.writeTextAtomic(companyId, AGENT_RUNTIME_FOLDER_KEY, "config.toml", nextToml);
+      writeTextAtomic(configPath, nextToml);
     }
 
     return { status: "synced" };

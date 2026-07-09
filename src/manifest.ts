@@ -25,7 +25,6 @@ const manifest: PaperclipPluginManifestV1 = {
     "jobs.schedule",
     "agent.tools.register",
     "http.outbound",
-    "local.folders",
     "instance.settings.register",
     "ui.detailTab.register",
     "ui.action.register",
@@ -124,15 +123,6 @@ const manifest: PaperclipPluginManifestV1 = {
     worker: "./dist/worker-bootstrap.js",
     ui: "./dist/ui",
   },
-  localFolders: [
-    {
-      folderKey: "agent-runtime-home",
-      displayName: "Agent Runtime Home (Codex)",
-      description: "This company's Codex CLI runtime home directory, so the plugin can register a Honcho MCP bridge script agents can call as an on-demand tool. Configured via the Agent Runtime Home Path Template setting.",
-      access: "readWrite",
-      requiredFiles: ["config.toml"],
-    },
-  ],
   jobs: [
     {
       jobKey: JOB_KEYS.initializeMemory,

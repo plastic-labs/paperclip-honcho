@@ -1,68 +1,76 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveConfig } from "../src/config.js";
 import { BRIDGE_SCRIPT_FILENAME, buildBridgeScriptSource, syncAgentRuntimeMcpBridge } from "../src/mcp-bridge.js";
-import { createHonchoHarness } from "./helpers.js";
+
+let baseDir: string;
+
+function configForTemplate(template: string) {
+  return resolveConfig({ agentRuntimeHomePathTemplate: template });
+}
 
 describe("honcho mcp bridge", () => {
+  beforeEach(() => {
+    baseDir = fs.mkdtempSync(join(tmpdir(), "honcho-codex-home-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
   it("is skipped when no agent runtime home path template is configured", async () => {
-    const harness = createHonchoHarness();
-    const config = resolveConfig(await harness.ctx.config.get());
-
-    const result = await syncAgentRuntimeMcpBridge(harness.ctx, "co_1", config);
-
+    const result = await syncAgentRuntimeMcpBridge("co_1", configForTemplate(""));
     expect(result).toEqual({ status: "skipped" });
   });
 
-  it("writes the bridge script and a config.toml entry, substituting {companyId}", async () => {
-    const harness = createHonchoHarness({
-      config: { agentRuntimeHomePathTemplate: "/homes/{companyId}/codex-home" },
-    });
-    const config = resolveConfig(await harness.ctx.config.get());
+  it("fails softly when the configured runtime home does not exist yet", async () => {
+    const result = await syncAgentRuntimeMcpBridge(
+      "co_1",
+      configForTemplate(join(baseDir, "{companyId}", "codex-home")),
+    );
+    expect(result.status).toBe("failed");
+  });
 
-    const result = await syncAgentRuntimeMcpBridge(harness.ctx, "co_1", config);
+  it("writes the bridge script and a config.toml entry, substituting {companyId}", async () => {
+    const home = join(baseDir, "co_1");
+    fs.mkdirSync(home, { recursive: true });
+
+    const result = await syncAgentRuntimeMcpBridge("co_1", configForTemplate(join(baseDir, "{companyId}")));
 
     expect(result).toEqual({ status: "synced" });
-    const status = await harness.ctx.localFolders.status("co_1", "agent-runtime-home");
-    expect(status.path).toBe("/homes/co_1/codex-home");
-
-    const script = await harness.ctx.localFolders.readText("co_1", "agent-runtime-home", BRIDGE_SCRIPT_FILENAME);
-    expect(script).toBe(buildBridgeScriptSource());
-
-    const toml = await harness.ctx.localFolders.readText("co_1", "agent-runtime-home", "config.toml");
+    expect(fs.readFileSync(join(home, BRIDGE_SCRIPT_FILENAME), "utf8")).toBe(buildBridgeScriptSource());
+    const toml = fs.readFileSync(join(home, "config.toml"), "utf8");
     expect(toml).toContain("[mcp_servers.paperclip_honcho]");
-    expect(toml).toContain(`args = ["/homes/co_1/codex-home/${BRIDGE_SCRIPT_FILENAME}"]`);
+    expect(toml).toContain(`args = [${JSON.stringify(join(home, BRIDGE_SCRIPT_FILENAME))}]`);
+    expect(toml).toContain("env_vars = [\"PAPERCLIP_API_URL\"");
   });
 
   it("does not rewrite files on a repeat sync when nothing changed", async () => {
-    const harness = createHonchoHarness({
-      config: { agentRuntimeHomePathTemplate: "/homes/{companyId}/codex-home" },
-    });
-    const config = resolveConfig(await harness.ctx.config.get());
-    await syncAgentRuntimeMcpBridge(harness.ctx, "co_1", config);
+    const home = join(baseDir, "co_1");
+    fs.mkdirSync(home, { recursive: true });
+    const template = join(baseDir, "{companyId}");
+    await syncAgentRuntimeMcpBridge("co_1", configForTemplate(template));
 
-    const writeSpy = vi.spyOn(harness.ctx.localFolders, "writeTextAtomic");
-    const result = await syncAgentRuntimeMcpBridge(harness.ctx, "co_1", config);
+    const scriptIno = fs.statSync(join(home, BRIDGE_SCRIPT_FILENAME)).ino;
+    const tomlIno = fs.statSync(join(home, "config.toml")).ino;
 
+    const result = await syncAgentRuntimeMcpBridge("co_1", configForTemplate(template));
+
+    // Unchanged content → files left untouched. writeTextAtomic swaps in a new
+    // inode via rename, so a stable inode proves no rewrite occurred.
     expect(result).toEqual({ status: "synced" });
-    expect(writeSpy).not.toHaveBeenCalled();
+    expect(fs.statSync(join(home, BRIDGE_SCRIPT_FILENAME)).ino).toBe(scriptIno);
+    expect(fs.statSync(join(home, "config.toml")).ino).toBe(tomlIno);
   });
 
   it("replaces a stale version block instead of duplicating it, preserving unrelated config.toml content", async () => {
-    const harness = createHonchoHarness({
-      config: { agentRuntimeHomePathTemplate: "/homes/{companyId}/codex-home" },
-    });
-    const config = resolveConfig(await harness.ctx.config.get());
-
-    await harness.ctx.localFolders.configure({
-      companyId: "co_1",
-      folderKey: "agent-runtime-home",
-      path: "/homes/co_1/codex-home",
-      access: "readWrite",
-    });
-    await harness.ctx.localFolders.writeTextAtomic(
-      "co_1",
-      "agent-runtime-home",
-      "config.toml",
+    const home = join(baseDir, "co_1");
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(
+      join(home, "config.toml"),
       [
         "model = \"gpt-5.5\"",
         "",
@@ -77,18 +85,18 @@ describe("honcho mcp bridge", () => {
       ].join("\n"),
     );
 
-    const result = await syncAgentRuntimeMcpBridge(harness.ctx, "co_1", config);
+    const result = await syncAgentRuntimeMcpBridge("co_1", configForTemplate(join(baseDir, "{companyId}")));
     expect(result).toEqual({ status: "synced" });
 
-    const toml = await harness.ctx.localFolders.readText("co_1", "agent-runtime-home", "config.toml");
+    const toml = fs.readFileSync(join(home, "config.toml"), "utf8");
     expect(toml).toContain("model = \"gpt-5.5\"");
     expect(toml).toContain("[mcp_servers.other_tool]");
     expect(toml).not.toContain("/stale/path.cjs");
     expect(toml.match(/\[mcp_servers\.paperclip_honcho\]/g)).toHaveLength(1);
-    expect(toml).toContain("/homes/co_1/codex-home/" + BRIDGE_SCRIPT_FILENAME);
+    expect(toml).toContain(join(home, BRIDGE_SCRIPT_FILENAME));
   });
 
-  it("generates a self-contained script exposing every manifest tool", async () => {
+  it("generates a self-contained script exposing every manifest tool", () => {
     const source = buildBridgeScriptSource();
     expect(() => new Function(source.replace(/^#!.*\n/, ""))).not.toThrow();
     expect(source).toContain("honcho_search_memory");

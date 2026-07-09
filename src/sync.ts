@@ -1531,7 +1531,7 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   // abort the rest of this function, which must never take the independent
   // MCP bridge sync down with it. Best-effort: only runs when an operator
   // has opted in via agentRuntimeHomePathTemplate.
-  const bridgeResult = await syncAgentRuntimeMcpBridge(ctx, companyId, config).catch(
+  const bridgeResult = await syncAgentRuntimeMcpBridge(companyId, config).catch(
     (error): McpBridgeSyncResult => ({
       status: "failed",
       message: error instanceof Error ? error.message : String(error),
