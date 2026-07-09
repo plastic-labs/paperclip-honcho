@@ -71,6 +71,11 @@ export type IssueSyncStatus = {
   lastSyncedCommentCreatedAt: string | null;
   lastSyncedDocumentRevisionKey: string | null;
   lastSyncedDocumentRevisionId: string | null;
+  // Per-document dedup cursor: document key -> the revision id last synced for
+  // that document. Unlike the single lastSyncedDocumentRevisionId (kept for
+  // display), this correctly tracks multiple independently-revised documents
+  // on one issue so an edit to one doc never re-syncs the others.
+  syncedDocumentRevisions?: Record<string, string>;
   lastSyncedRunId: string | null;
   lastSyncedRunFinishedAt: string | null;
   lastBackfillAt: string | null;

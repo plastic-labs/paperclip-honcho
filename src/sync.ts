@@ -70,6 +70,7 @@ import type {
   HonchoMessageInput,
   HonchoResolvedConfig,
   IssueDocumentBundle,
+  IssueSyncStatus,
   InitializationReport,
   MemoryStatusData,
   MigrationJobStatusData,
@@ -354,17 +355,20 @@ async function buildDocumentMessages(
   issue: Issue,
   documents: IssueDocumentBundle[],
   config: HonchoResolvedConfig,
-  lastSyncedRevisionId: string | null,
+  replay: boolean,
+  syncedDocumentRevisions: Record<string, string>,
 ): Promise<HonchoMessageInput[]> {
   const messages: HonchoMessageInput[] = [];
-  let unlocked = lastSyncedRevisionId == null;
 
   for (const bundle of documents) {
     for (const revision of bundle.revisions) {
-      if (!unlocked) {
-        if (revision.id === lastSyncedRevisionId) {
-          unlocked = true;
-        }
+      // Per-document dedup: a document's revision is only (re)synced when its
+      // revision id differs from what was last synced for that specific
+      // document key. This is order-independent and handles multiple
+      // independently-revised documents on one issue correctly — unlike a
+      // single linear cursor, which re-synced trailing documents and dropped
+      // edits to others whenever an issue had more than one document.
+      if (!replay && syncedDocumentRevisions[bundle.document.key] === revision.id) {
         continue;
       }
       const actor = actorFromDocumentRevision(revision);
@@ -1026,6 +1030,42 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
   let failed = 0;
   let firstError: string | null = null;
 
+  // Track, per issue, the content this import confirmed is in Honcho (whether
+  // freshly imported or already present) so we can advance that issue's
+  // event-sync cursors afterward. Without this, migration import and the
+  // event-driven syncIssue path keep independent dedup state, so the first
+  // syncIssue after an initialize-memory re-appends every comment migration
+  // already imported.
+  type IssueCursorSeed = {
+    latestCommentId?: string;
+    latestCommentCreatedAt?: string;
+    documentRevisions: Record<string, string>;
+  };
+  const issueSeeds = new Map<string, IssueCursorSeed>();
+  const recordCoveredCandidate = (candidate: MigrationSourceCandidate) => {
+    if (!candidate.issueId) return;
+    const issueId = candidate.issueId;
+    const seed = issueSeeds.get(issueId) ?? { documentRevisions: {} };
+    if (candidate.sourceType === "issue_comments") {
+      // Candidates are globally sorted by createdAt ascending, so a later
+      // covered comment is always at least as recent as the current seed.
+      if (
+        !seed.latestCommentCreatedAt
+        || Date.parse(candidate.createdAt) >= Date.parse(seed.latestCommentCreatedAt)
+      ) {
+        seed.latestCommentId = candidate.sourceId;
+        seed.latestCommentCreatedAt = candidate.createdAt;
+      }
+    } else if (candidate.sourceType === "issue_documents") {
+      const documentKey = typeof candidate.metadata.documentKey === "string" ? candidate.metadata.documentKey : null;
+      const revisionId = typeof candidate.metadata.documentRevisionId === "string" ? candidate.metadata.documentRevisionId : null;
+      if (documentKey && revisionId) {
+        seed.documentRevisions[documentKey] = revisionId;
+      }
+    }
+    issueSeeds.set(issueId, seed);
+  };
+
   await patchCompanySyncStatus(ctx, companyId, {
     migrationStatus: "running",
     lastError: null,
@@ -1060,9 +1100,37 @@ export async function importMigrationPreview(ctx: PluginContext, companyId: stri
       } else {
         skipped += 1;
       }
+      // Imported or skipped-because-already-present both mean this content is
+      // in Honcho, so it should count toward advancing the issue's sync cursor.
+      recordCoveredCandidate(candidate);
     } catch (error) {
       failed += 1;
       firstError ??= error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // Advance each affected issue's event-sync cursors to reflect the content
+  // migration just confirmed is in Honcho. Advance-only: never regress a
+  // cursor an event sync may have already moved further forward.
+  for (const [issueId, seed] of issueSeeds) {
+    const current = await getIssueSyncStatus(ctx, issueId);
+    const patch: Partial<IssueSyncStatus> = {};
+    if (
+      seed.latestCommentId
+      && seed.latestCommentCreatedAt
+      && (
+        !current.lastSyncedCommentCreatedAt
+        || Date.parse(seed.latestCommentCreatedAt) >= Date.parse(current.lastSyncedCommentCreatedAt)
+      )
+    ) {
+      patch.lastSyncedCommentId = seed.latestCommentId;
+      patch.lastSyncedCommentCreatedAt = seed.latestCommentCreatedAt;
+    }
+    if (Object.keys(seed.documentRevisions).length > 0) {
+      patch.syncedDocumentRevisions = { ...(current.syncedDocumentRevisions ?? {}), ...seed.documentRevisions };
+    }
+    if (Object.keys(patch).length > 0) {
+      await patchIssueSyncStatus(ctx, issueId, patch);
     }
   }
 
@@ -1244,7 +1312,7 @@ export async function syncIssue(
         ? await buildCommentMessages(ctx, resources.issue, resources.comments, config, replay, replay ? null : status.lastSyncedCommentId)
         : [];
       const documentMessages = config.syncIssueDocuments
-        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay ? null : status.lastSyncedDocumentRevisionId)
+        ? await buildDocumentMessages(ctx, resources.issue, resources.documents, config, replay, status.syncedDocumentRevisions ?? {})
         : [];
       const allMessages = [...commentMessages, ...documentMessages];
       if (allMessages.length > 0) {
@@ -1255,12 +1323,25 @@ export async function syncIssue(
 
       const lastComment = resources.comments.at(-1) ?? null;
       const lastDocumentRevision = resources.documents.flatMap((bundle) => bundle.revisions).sort(compareRevisions).at(-1) ?? null;
+      // Every document currently on the issue has its latest revision in Honcho
+      // after a successful append (freshly synced this pass, or synced earlier
+      // and skipped). Record each document's revision id so the next sync only
+      // re-emits documents whose revision actually changed.
+      const nextSyncedDocumentRevisions: Record<string, string> = { ...(status.syncedDocumentRevisions ?? {}) };
+      if (config.syncIssueDocuments) {
+        for (const bundle of resources.documents) {
+          for (const revision of bundle.revisions) {
+            nextSyncedDocumentRevisions[bundle.document.key] = revision.id;
+          }
+        }
+      }
       const context = await refreshContextPreview(ctx, resources.issue, resources.company, config, client);
       await patchIssueSyncStatus(ctx, issueId, {
         lastSyncedCommentId: lastComment?.id ?? status.lastSyncedCommentId,
         lastSyncedCommentCreatedAt: lastComment ? new Date(lastComment.createdAt).toISOString() : status.lastSyncedCommentCreatedAt,
         lastSyncedDocumentRevisionKey: lastDocumentRevision?.key ?? status.lastSyncedDocumentRevisionKey,
         lastSyncedDocumentRevisionId: lastDocumentRevision?.id ?? status.lastSyncedDocumentRevisionId,
+        syncedDocumentRevisions: nextSyncedDocumentRevisions,
         lastBackfillAt: new Date().toISOString(),
         replayInProgress: false,
         lastError: null,
