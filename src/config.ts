@@ -54,6 +54,7 @@ export function resolveConfig(config: HonchoPluginConfig | Record<string, unknow
     flushBeforeReset: normalizeBoolean(input.flushBeforeReset, DEFAULT_CONFIG.flushBeforeReset),
     useLocalHonchoConfig: normalizeBoolean(input.useLocalHonchoConfig, DEFAULT_CONFIG.useLocalHonchoConfig),
     bootstrapLocalHonchoConfig: normalizeBoolean(input.bootstrapLocalHonchoConfig, DEFAULT_CONFIG.bootstrapLocalHonchoConfig),
+    agentRuntimeHomePathTemplate: normalizeString(input.agentRuntimeHomePathTemplate, DEFAULT_CONFIG.agentRuntimeHomePathTemplate),
   };
 }
 

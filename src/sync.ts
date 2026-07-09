@@ -22,7 +22,6 @@ import {
   peerIdForAgent,
   peerIdForUser,
   systemPeerId,
-  workspaceIdForCompany,
 } from "./ids.js";
 import {
   actorFromComment,
@@ -42,12 +41,14 @@ import {
   patchIssueSyncStatus,
 } from "./state.js";
 import { createHonchoClient } from "./honcho-client.js";
+import { syncAgentRuntimeMcpBridge, type McpBridgeSyncResult } from "./mcp-bridge.js";
 import {
   buildMigrationReportPayload,
   ensureActorPeerMapping,
   getImportLedgerRecord,
   listJobsForUi,
   listMappingCounts,
+  resolveCanonicalAgentPeerId,
   resolveCanonicalIssueSessionId,
   upsertAgentPeerMapping,
   upsertBootstrapSessionMapping,
@@ -98,7 +99,9 @@ async function resolvePeerIdFromActor(
 ): Promise<string> {
   if (actor.authorType === "agent") {
     const agent = await ctx.agents.get(actor.authorId, companyId);
-    return peerIdForAgent(actor.authorId, agent?.name ?? null);
+    return agent
+      ? await resolveCanonicalAgentPeerId(ctx, companyId, agent)
+      : peerIdForAgent(actor.authorId, null);
   }
   if (actor.authorType === "user") return peerIdForUser(actor.authorId);
   return systemPeerId();
@@ -899,7 +902,7 @@ async function ensureMigrationCandidateImported(
     const peerId = isGuidance
       ? systemPeerId()
       : agentProfile
-        ? peerIdForAgent(agentProfile.id, agentProfile.name)
+        ? await resolveCanonicalAgentPeerId(ctx, companyId, agentProfile)
         : ownerPeerIdForCompany(companyId);
     if (isGuidance) {
       await client.ensurePeer(companyId, peerId, {
@@ -1137,9 +1140,10 @@ export async function initializeMemory(ctx: PluginContext, companyId: string): P
   });
 
   try {
-    // repairMappings must run before probeConnection: it force-corrects a
-    // stale workspace mapping if one exists, and probeConnection would
-    // otherwise throw on that exact mismatch before repair ever gets to run.
+    // repairMappings must run before probeConnection: it ensures a workspace
+    // mapping and any missing peer/session mappings exist (self-healing a
+    // company that has issues/agents but never completed initialization)
+    // without ever changing an already-established mapping's ids.
     await repairMappings(ctx, companyId);
     await client.probeConnection(companyId, company);
     const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
@@ -1413,16 +1417,31 @@ export async function repairMappings(ctx: PluginContext, companyId: string): Pro
   const client = await createHonchoClient({ ctx, config });
   let repaired = 0;
 
-  // Force the persisted mapping to match what current config/company name
-  // computes before touching the client. A stale mapping (e.g. recorded back
-  // when the company had no name yet) would otherwise make
-  // ensureCompanyWorkspace throw a "mapping mismatch" error before repair
-  // ever gets a chance to run — the exact case this function exists to fix.
-  const expectedWorkspaceId = workspaceIdForCompany(companyId, config.workspacePrefix, company?.name ?? null);
-  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix, "mapped", expectedWorkspaceId, true);
+  // Ensure a workspace mapping exists. If one is already recorded, its
+  // workspaceId is canonical and is left untouched — Honcho workspace/peer/
+  // session ids must stay stable across renames and plugin upgrades, or a
+  // company's accumulated memory (representations, conclusions, dreams)
+  // becomes unreachable the next time this runs.
+  await upsertWorkspaceMapping(ctx, company, companyId, config.workspacePrefix);
 
   const workspaceId = await client.ensureCompanyWorkspace(companyId, company);
   repaired += 1;
+
+  // Runs right after the workspace mapping, before the per-agent/per-issue
+  // loops below: those loops can throw on a single already-mapped row (a
+  // host-side upsert quirk on existing rows, unrelated to this plugin) and
+  // abort the rest of this function, which must never take the independent
+  // MCP bridge sync down with it. Best-effort: only runs when an operator
+  // has opted in via agentRuntimeHomePathTemplate.
+  const bridgeResult = await syncAgentRuntimeMcpBridge(ctx, companyId, config).catch(
+    (error): McpBridgeSyncResult => ({
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+    }),
+  );
+  if (bridgeResult.status === "failed") {
+    ctx.logger.warn("Honcho MCP bridge sync failed", { companyId, error: bridgeResult.message });
+  }
 
   const agents = await listCompanyAgents(ctx, companyId);
   for (const agent of agents) {

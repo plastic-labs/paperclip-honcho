@@ -25,6 +25,7 @@ const manifest: PaperclipPluginManifestV1 = {
     "jobs.schedule",
     "agent.tools.register",
     "http.outbound",
+    "local.folders",
     "instance.settings.register",
     "ui.detailTab.register",
     "ui.action.register",
@@ -62,6 +63,12 @@ const manifest: PaperclipPluginManifestV1 = {
         type: "boolean",
         title: "Inject Honcho Prompt Context",
         default: DEFAULT_CONFIG.enablePromptContext,
+      },
+      agentRuntimeHomePathTemplate: {
+        type: "string",
+        title: "Agent Runtime Home Path Template",
+        description: "Absolute path template for this company's Codex CLI runtime home (e.g. /path/to/.paperclip/instances/default/companies/{companyId}/codex-home), with {companyId} substituted automatically. When set, clicking \"Initialize Honcho memory\" writes a small MCP bridge script here and registers it in that home's config.toml, so agents can call this plugin's Honcho tools on demand instead of only receiving pushed context. Leave blank to disable. Machine-specific; only applies to Codex-based agents on this host.",
+        default: DEFAULT_CONFIG.agentRuntimeHomePathTemplate,
       },
       enablePeerChat: {
         type: "boolean",
@@ -117,6 +124,15 @@ const manifest: PaperclipPluginManifestV1 = {
     worker: "./dist/worker-bootstrap.js",
     ui: "./dist/ui",
   },
+  localFolders: [
+    {
+      folderKey: "agent-runtime-home",
+      displayName: "Agent Runtime Home (Codex)",
+      description: "This company's Codex CLI runtime home directory, so the plugin can register a Honcho MCP bridge script agents can call as an on-demand tool. Configured via the Agent Runtime Home Path Template setting.",
+      access: "readWrite",
+      requiredFiles: ["config.toml"],
+    },
+  ],
   jobs: [
     {
       jobKey: JOB_KEYS.initializeMemory,

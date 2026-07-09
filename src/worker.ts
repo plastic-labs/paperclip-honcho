@@ -105,8 +105,8 @@ const plugin = definePlugin({
 
     ctx.actions.register(ACTION_KEYS.initializeMemoryForCompany, async (params) => {
       const companyId = requireString(params.companyId, "companyId");
-      // Repair a stale workspace mapping here, inside the action call, rather
-      // than only inside the initialize-memory job. Paperclip's job dispatch
+      // Ensure workspace/peer/session mappings here, inside the action call,
+      // rather than only inside the initialize-memory job. Paperclip's job dispatch
       // (runJob) never registers a company-scoped invocation with the host
       // (unlike performAction), so a job-only fix is racy: any per-company
       // host call it makes only succeeds if nothing else happens to be

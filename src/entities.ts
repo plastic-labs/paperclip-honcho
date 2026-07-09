@@ -56,9 +56,13 @@ export async function upsertWorkspaceMapping(
   workspacePrefix: string,
   status: "created" | "existing" | "mapped" = "mapped",
   workspaceId?: string,
-  force = false,
 ) {
-  const existing = force ? null : await getWorkspaceMappingRecord(ctx, companyId);
+  // Once a company has a mapped workspace, that id is canonical forever: it
+  // must never be recomputed from the company's current name/prefix, or a
+  // rename would silently redirect future syncs at a brand-new Honcho
+  // workspace and orphan everything (peers, conclusions, dreams) already
+  // accumulated under the old one.
+  const existing = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof existing?.data.workspaceId === "string" && existing.data.workspaceId.trim()
     ? existing.data.workspaceId
     : null;
@@ -163,7 +167,7 @@ export async function upsertAgentPeerMapping(
   agent: Agent,
   status: "mapped" | "missing" = "mapped",
 ) {
-  const peerId = peerIdForAgent(agent.id, agent.name);
+  const peerId = await resolveCanonicalAgentPeerId(ctx, companyId, agent);
   return await upsertEntity(ctx, {
     entityType: ENTITY_TYPES.peerMapping,
     scopeKind: "company",
@@ -327,26 +331,38 @@ export async function getSessionMappingRecord(ctx: PluginContext, issueId: strin
   return records[0] ?? null;
 }
 
+export async function getAgentPeerMappingRecord(ctx: PluginContext, companyId: string, agentId: string) {
+  const records = await listPluginEntities(ctx, {
+    entityType: ENTITY_TYPES.peerMapping,
+    scopeKind: "company",
+    scopeId: companyId,
+    externalId: `paperclip:agent:${agentId}`,
+    limit: 1,
+  });
+  return records[0] ?? null;
+}
+
 export async function resolveCanonicalWorkspaceId(
   ctx: PluginContext,
   companyId: string,
   workspacePrefix: string,
 ) {
-  const company = await ctx.companies.get(companyId);
-  const expectedWorkspaceId = workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
   const mapping = await getWorkspaceMappingRecord(ctx, companyId);
   const mappedWorkspaceId = typeof mapping?.data.workspaceId === "string" && mapping.data.workspaceId.trim()
     ? mapping.data.workspaceId
     : null;
-  if (mappedWorkspaceId) {
-    if (mappedWorkspaceId !== expectedWorkspaceId) {
-      throw new Error(
-        `Workspace mapping mismatch for company '${companyId}': mapped workspace '${mappedWorkspaceId}' does not match expected workspace '${expectedWorkspaceId}'`,
-      );
-    }
-    return mappedWorkspaceId;
-  }
-  return expectedWorkspaceId;
+  if (mappedWorkspaceId) return mappedWorkspaceId;
+  const company = await ctx.companies.get(companyId);
+  return workspaceIdForCompany(companyId, workspacePrefix, company?.name ?? null);
+}
+
+export async function resolveCanonicalAgentPeerId(ctx: PluginContext, companyId: string, agent: Agent) {
+  const mapping = await getAgentPeerMappingRecord(ctx, companyId, agent.id);
+  const mappedPeerId = typeof mapping?.data.peerId === "string" && mapping.data.peerId.trim()
+    ? mapping.data.peerId
+    : null;
+  if (mappedPeerId) return mappedPeerId;
+  return peerIdForAgent(agent.id, agent.name);
 }
 
 export async function resolveCanonicalIssueSessionId(

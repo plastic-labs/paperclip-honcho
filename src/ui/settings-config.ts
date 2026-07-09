@@ -43,6 +43,7 @@ export function normalizeSettingsConfig(configJson: Record<string, unknown> | nu
     flushBeforeReset: typeof source.flushBeforeReset === "boolean" ? source.flushBeforeReset : DEFAULT_CONFIG.flushBeforeReset,
     useLocalHonchoConfig: typeof source.useLocalHonchoConfig === "boolean" ? source.useLocalHonchoConfig : DEFAULT_CONFIG.useLocalHonchoConfig,
     bootstrapLocalHonchoConfig: typeof source.bootstrapLocalHonchoConfig === "boolean" ? source.bootstrapLocalHonchoConfig : DEFAULT_CONFIG.bootstrapLocalHonchoConfig,
+    agentRuntimeHomePathTemplate: typeof source.agentRuntimeHomePathTemplate === "string" ? source.agentRuntimeHomePathTemplate : DEFAULT_CONFIG.agentRuntimeHomePathTemplate,
   };
 }
 

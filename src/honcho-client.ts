@@ -2,7 +2,7 @@ import type { Agent, Company, Issue, PluginContext } from "@paperclipai/plugin-s
 import { DEFAULT_BACKFILL_BATCH_SIZE, DEFAULT_CONTEXT_SUMMARY_LIMIT, DEFAULT_CONTEXT_TOKEN_LIMIT, HONCHO_V3_PATH } from "./constants.js";
 import { isHonchoCloudBaseUrl } from "./deployment.js";
 import { readLocalHonchoConfig } from "./local-honcho-config.js";
-import { resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
+import { resolveCanonicalAgentPeerId, resolveCanonicalIssueSessionId, resolveCanonicalWorkspaceId } from "./entities.js";
 import { peerIdForAgent, peerIdForUser } from "./ids.js";
 import type {
   AskPeerParams,
@@ -176,6 +176,7 @@ export class HonchoClient {
   private readonly ensuredPeers = new Set<string>();
   private readonly resolvedWorkspaceIds = new Map<string, string>();
   private readonly resolvedSessionIds = new Map<string, string>();
+  private readonly resolvedAgentPeerIds = new Map<string, string>();
 
   constructor(input: HonchoClientInput & { apiKey: string | null }) {
     this.ctx = input.ctx;
@@ -210,8 +211,17 @@ export class HonchoClient {
   }
 
   private async agentPeerId(companyId: string, agentId: string): Promise<string> {
+    const cacheKey = `${companyId}:${agentId}`;
+    const cachedPeerId = this.resolvedAgentPeerIds.get(cacheKey);
+    if (cachedPeerId) {
+      return cachedPeerId;
+    }
     const agent = await this.ctx.agents.get(agentId, companyId);
-    return peerIdForAgent(agentId, agent?.name ?? null);
+    const peerId = agent
+      ? await resolveCanonicalAgentPeerId(this.ctx, companyId, agent)
+      : peerIdForAgent(agentId, null);
+    this.resolvedAgentPeerIds.set(cacheKey, peerId);
+    return peerId;
   }
 
   async ensureWorkspace(companyId: string): Promise<string> {
@@ -279,9 +289,11 @@ export class HonchoClient {
   }
 
   async ensureAgentPeer(companyId: string, agent: Agent): Promise<string> {
+    const peerId = await resolveCanonicalAgentPeerId(this.ctx, companyId, agent);
+    this.resolvedAgentPeerIds.set(`${companyId}:${agent.id}`, peerId);
     return await this.ensurePeer(
       companyId,
-      peerIdForAgent(agent.id, agent.name),
+      peerId,
       {
         company_id: companyId,
         agent_id: agent.id,
@@ -515,18 +527,15 @@ export class HonchoClient {
 
   async searchMemory(companyId: string, agentId: string, params: SearchMemoryParams): Promise<HonchoSearchResult[]> {
     const agent = await this.ctx.agents.get(agentId, companyId);
-    const agentPeerId = peerIdForAgent(agentId, agent?.name ?? null);
-    if (agent) {
-      await this.ensureAgentPeer(companyId, agent);
-    } else {
-      await this.ensurePeer(companyId, agentPeerId, {
+    const agentPeerId = agent
+      ? await this.ensureAgentPeer(companyId, agent)
+      : await this.ensurePeer(companyId, peerIdForAgent(agentId, null), {
         company_id: companyId,
         agent_id: agentId,
       }, {
         observe_me: this.config.observe_me,
         observe_others: this.config.observe_others,
       });
-    }
     const workspaceId = await this.workspaceId(companyId);
     const scopedSessionId = params.scope === "workspace"
       ? undefined

@@ -25,6 +25,7 @@ export type HonchoPluginConfig = {
   flushBeforeReset?: boolean;
   useLocalHonchoConfig?: boolean;
   bootstrapLocalHonchoConfig?: boolean;
+  agentRuntimeHomePathTemplate?: string;
 };
 
 export type HonchoResolvedConfig = {
@@ -43,6 +44,7 @@ export type HonchoResolvedConfig = {
   flushBeforeReset: boolean;
   useLocalHonchoConfig: boolean;
   bootstrapLocalHonchoConfig: boolean;
+  agentRuntimeHomePathTemplate: string;
 };
 
 export type MigrationSourceType =

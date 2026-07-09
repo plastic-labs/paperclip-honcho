@@ -26,6 +26,7 @@ export const BASE_CONFIG = {
   flushBeforeReset: false,
   useLocalHonchoConfig: true,
   bootstrapLocalHonchoConfig: false,
+  agentRuntimeHomePathTemplate: "",
 };
 
 export type SeedOverrides = {

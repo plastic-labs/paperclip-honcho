@@ -86,7 +86,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("fails closed when a stored workspace mapping points at a different workspace", async () => {
+  it("keeps syncing to a previously stored workspace even after the configured prefix changes", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -110,13 +110,12 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await expect(harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" })).rejects.toThrow(
-      `mapped workspace 'paperclip_co_1' does not match expected workspace '${companyWorkspaceId}'`,
-    );
+    await harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" });
 
-    expect(requestsMatching(requests, "/peers")).toHaveLength(0);
-    expect(requestsMatching(requests, "/sessions")).toHaveLength(0);
-    expect(requestsMatching(requests, "/messages")).toHaveLength(0);
+    // The stored mapping is canonical forever: a config/company-name change
+    // must never redirect existing sync traffic at a different workspace.
+    expect(requestsMatching(requests, "/workspaces/paperclip_co_1/")).not.toHaveLength(0);
+    expect(requestsMatching(requests, `/workspaces/${companyWorkspaceId}/`)).toHaveLength(0);
   });
 
   it("initialize-memory works against self-hosted Honcho without an API key secret", async () => {
@@ -447,6 +446,35 @@ describe("honcho memory jobs", () => {
     });
   });
 
+  it("keeps an agent's peer id stable after the agent is renamed", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+
+    await plugin.definition.setup(harness.ctx);
+    await harness.runJob("initialize-memory");
+
+    const renamedAgentPeerId = peerIdForAgent("agent_1", "Renamed Agent");
+    expect(renamedAgentPeerId).not.toBe(firstAgentPeerId);
+
+    harness.seed({
+      agents: [{
+        ...(await harness.ctx.agents.get("agent_1", "co_1"))!,
+        name: "Renamed Agent",
+      }],
+    });
+
+    await harness.runJob("initialize-memory");
+
+    expect(requestsMatching(requests, "/peers").some((request) => request.body?.id === renamedAgentPeerId)).toBe(false);
+    const peerMappings = await harness.ctx.entities.list({
+      entityType: "honcho-peer-mapping",
+      scopeKind: "company",
+      scopeId: "co_1",
+      externalId: "paperclip:agent:agent_1",
+    });
+    expect(peerMappings[0]?.data).toMatchObject({ peerId: firstAgentPeerId });
+  });
+
   it("migration-import maps agent profile files to agent peers instead of owner peers", async () => {
     const { requests } = installFetchMock();
     const harness = createHonchoHarness();
@@ -561,7 +589,7 @@ describe("honcho memory jobs", () => {
     });
   });
 
-  it("initialize-memory repairs a mismatched stored workspace instead of failing", async () => {
+  it("initialize-memory never migrates an existing stored workspace mapping", async () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -593,10 +621,14 @@ describe("honcho memory jobs", () => {
       scopeId: "co_1",
       externalId: "paperclip:company:co_1",
     });
+    // A company rename or a workspacePrefix config change must never redirect
+    // an already-established mapping to a different Honcho workspace, or the
+    // company's accumulated memory under the old id becomes unreachable.
     expect(workspaceMappings[0]?.data).toMatchObject({
-      workspaceId: companyWorkspaceId,
-      workspacePrefix: "renamed",
+      workspaceId: "paperclip_co_1",
+      workspacePrefix: "paperclip",
     });
+    expect(workspaceMappings[0]?.data.workspaceId).not.toBe(companyWorkspaceId);
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",

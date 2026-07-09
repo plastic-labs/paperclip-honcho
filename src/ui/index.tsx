@@ -497,6 +497,19 @@ function SyncProfileSection(props: {
           style={inputStyle}
         />
       </label>
+      <label style={labelStyle}>
+        <span>Agent runtime home path template (optional)</span>
+        <input
+          value={props.config.agentRuntimeHomePathTemplate}
+          onChange={(event) => props.onConfigChange({ agentRuntimeHomePathTemplate: event.target.value })}
+          placeholder="/path/to/.paperclip/instances/default/companies/{companyId}/codex-home"
+          style={inputStyle}
+        />
+        <span style={{ color: "#475569", fontSize: "0.82rem" }}>
+          When set, "Initialize Honcho memory" writes an MCP bridge script into this company's Codex runtime home
+          (with <code>{"{companyId}"}</code> substituted) so agents can call Honcho tools on demand. Machine-specific; leave blank to disable.
+        </span>
+      </label>
     </div>
   );
 }

@@ -108,6 +108,7 @@ export const DEFAULT_CONFIG = {
   flushBeforeReset: false,
   useLocalHonchoConfig: true,
   bootstrapLocalHonchoConfig: false,
+  agentRuntimeHomePathTemplate: "",
 } as const;
 
 export const ISSUE_STATUS_STATE_KEY = "issue-sync-status";
