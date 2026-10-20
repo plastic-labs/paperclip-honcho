@@ -1,5 +1,7 @@
 # @honcho-ai/paperclip-honcho
 
+> **Archived.** This plugin is no longer maintained. Paperclip now has a built-in Honcho connector: turn on **Settings > Experimental > Memory connectors**, then add **Honcho** under **Connectors**. See the [Paperclip guide](https://honcho.dev/docs/v3/guides/integrations/paperclip). Version 0.1.4 on npm still works on Paperclip 2026.1012.0.
+
 Add Honcho memory to Paperclip while keeping Paperclip as the system of record.
 
 This package targets the current public/latest Paperclip host surface. It supports tools, sync, migration import, and manual prompt previews without depending on automatic prompt-context injection hooks, run transcript import, or legacy workspace file import.
