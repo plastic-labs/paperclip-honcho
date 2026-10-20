@@ -34,11 +34,12 @@ describe("company-scoped plugin config (Paperclip >= 2026.9)", () => {
 
     await expect(plugin.definition.setup(harness.ctx)).resolves.not.toThrow();
 
-    const result = await harness.performAction<Record<string, unknown>>("test-connection", {});
+    // The host scopes the action to the settings page's company.
+    const result = await harness.performAction<Record<string, unknown>>("test-connection", {}, { companyId: "co_1" });
     expect(result.ok).toBe(true);
   });
 
-  it("passes the known company and falls back to the only company otherwise", async () => {
+  it("passes the known company and never borrows another company's config", async () => {
     installFetchMock();
     const harness = createHonchoHarness();
     const calls = makeHostRequireCompany(harness);
@@ -47,9 +48,8 @@ describe("company-scoped plugin config (Paperclip >= 2026.9)", () => {
     expect(scoped.honchoApiBaseUrl).toBeTruthy();
     expect(calls).toEqual(["co_1"]);
 
-    const fallback = await getResolvedConfig(harness.ctx);
-    expect(fallback.honchoApiBaseUrl).toBe(scoped.honchoApiBaseUrl);
-    expect(calls.slice(1)).toEqual([undefined, "co_1"]);
+    await expect(getResolvedConfig(harness.ctx)).rejects.toThrow("company context is required");
+    expect(calls.slice(1)).toEqual([undefined]);
   });
 
   it("keeps honcho_ask_peer for a company that enables chat when the first company disables it", async () => {

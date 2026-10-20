@@ -167,14 +167,6 @@ async function getInstanceJobTargets(ctx: PluginContext): Promise<InstanceJobTar
   return { ...(value as InstanceJobTargets) };
 }
 
-export async function setPreparedJobCompany(ctx: PluginContext, jobKey: string, companyId: string): Promise<void> {
-  const next = {
-    ...(await getInstanceJobTargets(ctx)),
-    [jobKey]: companyId,
-  };
-  await ctx.state.set(instanceJobTargetsStateKey(), next);
-}
-
 export async function consumePreparedJobCompany(ctx: PluginContext, jobKey: string): Promise<string | null> {
   const targets = await getInstanceJobTargets(ctx);
   const companyId = typeof targets[jobKey] === "string" && targets[jobKey].trim().length > 0

@@ -1,16 +1,24 @@
 import {
   definePlugin,
-  runWorker,
+  type PluginContext,
   type ToolRunContext,
   type ToolResult,
 } from "@paperclipai/plugin-sdk";
 import manifest from "./manifest.js";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_SEARCH_LIMIT, JOB_KEYS, RUNTIME_LAUNCHERS, TOOL_NAMES } from "./constants.js";
+import {
+  ACTION_KEYS,
+  DATA_KEYS,
+  DEFAULT_SEARCH_LIMIT,
+  INITIALIZE_ACTION_TIME_BUDGET_MS,
+  JOB_KEYS,
+  RUNTIME_LAUNCHERS,
+  TOOL_NAMES,
+} from "./constants.js";
 import { assertConfigured, getResolvedConfig, resolveConfig, validateConfig } from "./config.js";
 import { createHonchoClient } from "./honcho-client.js";
 import { bootstrapLocalHonchoConfig } from "./local-honcho-config.js";
 import type { HonchoResolvedConfig } from "./types.js";
-import { consumePreparedJobCompany, setPreparedJobCompany } from "./state.js";
+import { consumePreparedJobCompany, getCompanySyncStatus } from "./state.js";
 import {
   initializeMemory,
   getIssueContext,
@@ -23,7 +31,6 @@ import {
   loadMigrationJobStatusData,
   loadMigrationPreviewData,
   probePromptContext,
-  repairMappings,
   replayIssue,
   searchMemory,
   syncIssue,
@@ -34,6 +41,27 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`${field} is required`);
   }
   return value.trim();
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+// Issue events arrive for every company, configured or not. Skip a company
+// whose config cannot reach Honcho, such as Honcho cloud with no API key,
+// instead of sending Honcho unauthenticated requests on its behalf. Also skip
+// a company with no stored settings that never reached Honcho: its defaults
+// can be valid through a key on the worker's machine that every company
+// shares, but it has not opted in.
+async function getEventSyncConfig(ctx: PluginContext, companyId: string): Promise<HonchoResolvedConfig | null> {
+  const stored = await ctx.config.get(companyId);
+  const config = resolveConfig(stored);
+  if (!validateConfig(config).ok) return null;
+  if (Object.keys(stored ?? {}).length === 0
+    && (await getCompanySyncStatus(ctx, companyId)).connectionStatus === "not_configured") {
+    return null;
+  }
+  return config;
 }
 
 function inferIssueId(params: Record<string, unknown>, runCtx?: Partial<ToolRunContext>): string | null {
@@ -48,15 +76,14 @@ function maybeBootstrapLocalHonchoConfig(config: HonchoResolvedConfig): void {
 
 const plugin = definePlugin({
   async setup(ctx) {
-    // Activation must not depend on reading config: on current hosts that
-    // needs a company context `setup()` may not have yet. The local Honcho
-    // bootstrap is optional, so skip it rather than fail the whole plugin.
-    let initialConfig: HonchoResolvedConfig | null = null;
+    // Activation must not depend on reading config. Hosts with company-scoped
+    // config refuse config.get() here (no company in scope) and deliver stored
+    // config through onConfigChanged after start instead. The local Honcho
+    // bootstrap is optional, so skip it rather than fail.
     try {
-      initialConfig = await getResolvedConfig(ctx);
-      maybeBootstrapLocalHonchoConfig(initialConfig);
+      maybeBootstrapLocalHonchoConfig(await getResolvedConfig(ctx));
     } catch (error) {
-      ctx.logger.warn("Skipping local Honcho config bootstrap: plugin config not readable during setup", {
+      ctx.logger.info("Skipping local Honcho config bootstrap during setup: plugin config is not readable without a company", {
         reason: error instanceof Error ? error.message : String(error),
       });
     }
@@ -90,13 +117,17 @@ const plugin = definePlugin({
       return await loadIssueStatusData(ctx, issueId, companyId);
     });
 
-    ctx.actions.register(ACTION_KEYS.testConnection, async () => {
-      const config = await getResolvedConfig(ctx);
+    ctx.actions.register(ACTION_KEYS.testConnection, async (params) => {
+      // Read config for, and probe, the company the host scoped this call to.
+      // Without one, config.get() only succeeds on hosts whose config is
+      // instance-wide, where probing the first company is equivalent.
+      const scopedCompanyId = optionalString(params.companyId);
+      const config = await getResolvedConfig(ctx, scopedCompanyId ?? undefined);
       const validation = validateConfig(config);
       if (!validation.ok) {
         throw new Error(validation.errors?.join("; ") ?? "Honcho config is invalid");
       }
-      const companyId = (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id ?? null;
+      const companyId = scopedCompanyId ?? (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id ?? null;
       const company = companyId ? await ctx.companies.get(companyId) : null;
       const client = await createHonchoClient({ ctx, config });
       const { workspaceId } = await client.probeConnection(companyId ?? undefined, company);
@@ -115,17 +146,15 @@ const plugin = definePlugin({
 
     ctx.actions.register(ACTION_KEYS.initializeMemoryForCompany, async (params) => {
       const companyId = requireString(params.companyId, "companyId");
-      // Ensure workspace/peer/session mappings here, inside the action call,
-      // rather than only inside the initialize-memory job. Paperclip's job dispatch
-      // (runJob) never registers a company-scoped invocation with the host
-      // (unlike performAction), so a job-only fix is racy: any per-company
-      // host call it makes only succeeds if nothing else happens to be
-      // concurrently active in this plugin's worker process at that instant.
-      // Actions are properly scoped, so doing the critical repair here makes
-      // it reliable regardless of what else the worker is doing.
-      await repairMappings(ctx, companyId);
-      await setPreparedJobCompany(ctx, JOB_KEYS.initializeMemory, companyId);
-      return { ok: true, companyId };
+      // Run initialization here. The host scopes performAction to this
+      // company, but runJob carries no company, so company-scoped host calls
+      // made from the initialize-memory job are denied. An action has 30 s, so
+      // a large company takes several calls: done is false until the last one,
+      // and the settings page calls again until it is true.
+      const { report, progress } = await initializeMemory(ctx, companyId, {
+        deadline: Date.now() + INITIALIZE_ACTION_TIME_BUDGET_MS,
+      });
+      return { ok: true, companyId, done: report !== null, progress, report };
     });
 
     ctx.actions.register(ACTION_KEYS.probePromptContext, async (params) => {
@@ -138,15 +167,20 @@ const plugin = definePlugin({
     });
 
     ctx.jobs.register(JOB_KEYS.initializeMemory, async () => {
-      const companyId = await consumePreparedJobCompany(ctx, JOB_KEYS.initializeMemory)
-        ?? (await ctx.companies.list({ limit: 1, offset: 0 }))[0]?.id;
-      if (!companyId) throw new Error("No company available to initialize memory");
+      // Initialization runs in the initialize-memory-for-company action. The
+      // job only finishes a company an earlier plugin version queued for it,
+      // and never picks a company on its own.
+      const companyId = await consumePreparedJobCompany(ctx, JOB_KEYS.initializeMemory);
+      if (!companyId) {
+        ctx.logger.info("initialize-memory has no queued company; use Initialize Honcho memory on the settings page");
+        return;
+      }
       await initializeMemory(ctx, companyId);
     });
 
     ctx.events.on("issue.created", async (event) => {
       try {
-        if (!event.entityId) return;
+        if (!event.entityId || !(await getEventSyncConfig(ctx, event.companyId))) return;
         await syncIssue(ctx, event.entityId, event.companyId, { replay: false });
       } catch (error) {
         ctx.logger.warn("Honcho sync on issue.created failed", {
@@ -159,7 +193,7 @@ const plugin = definePlugin({
 
     ctx.events.on("issue.comment.created", async (event) => {
       try {
-        if (!event.entityId) return;
+        if (!event.entityId || !(await getEventSyncConfig(ctx, event.companyId))) return;
         const payload = typeof event.payload === "object" && event.payload !== null
           ? (event.payload as Record<string, unknown>)
           : {};
@@ -178,8 +212,8 @@ const plugin = definePlugin({
 
     ctx.events.on("issue.updated", async (event) => {
       try {
-        const config = await getResolvedConfig(ctx, event.companyId);
-        if (!config.syncIssueDocuments || !event.entityId) return;
+        const config = await getEventSyncConfig(ctx, event.companyId);
+        if (!config?.syncIssueDocuments || !event.entityId) return;
         await syncIssue(ctx, event.entityId, event.companyId, {
           replay: false,
           documentKeyHint: null,
@@ -423,5 +457,8 @@ const plugin = definePlugin({
   },
 });
 
+// No runWorker() here: src/worker-bootstrap.ts is the worker entrypoint and
+// starts the RPC host. esbuild bundles this module into that file, so a
+// runWorker(plugin, import.meta.url) call would pass its entrypoint check and
+// start a second RPC host on the same stdin, running every host request twice.
 export default plugin;
-runWorker(plugin, import.meta.url);

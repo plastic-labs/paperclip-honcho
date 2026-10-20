@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestHarness } from "@paperclipai/plugin-sdk/testing";
 import { PLUGIN_VERSION } from "../src/constants.js";
@@ -14,8 +15,10 @@ afterEach(() => {
 const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
 
 describe("honcho config", () => {
-  it("uses the shared plugin version constant in the manifest", () => {
+  it("reports the package version in the manifest", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
     expect(manifest.version).toBe(PLUGIN_VERSION);
+    expect(PLUGIN_VERSION).toBe(packageJson.version);
   });
 
   it("declares the settings page and issue memory tab using the current plugin framework slots", () => {
@@ -95,6 +98,7 @@ describe("honcho config", () => {
     expect(result?.ok).toBe(false);
     expect(result?.errors).toEqual([
       "Honcho base URL must use http or https",
+      "Honcho API key is required",
     ]);
   });
 

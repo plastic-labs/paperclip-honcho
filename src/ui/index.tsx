@@ -5,7 +5,7 @@ import {
   type PluginSettingsPageProps,
 } from "@paperclipai/plugin-sdk/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_JOB_WAIT_TIMEOUT_MS, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS, JOB_KEYS, PLUGIN_ID } from "../constants.js";
+import { ACTION_KEYS, DATA_KEYS, DEFAULT_CONFIG, DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS, PLUGIN_ID } from "../constants.js";
 import type {
   IssueMemoryStatusData,
   MemoryStatusData,
@@ -117,13 +117,6 @@ const migrationRowStyle: React.CSSProperties = {
   border: "1px solid rgba(15, 23, 42, 0.08)",
 };
 
-type PluginJobRecord = {
-  id: string;
-  jobKey: string;
-  displayName: string;
-  status: string;
-};
-
 type CompanyRecord = {
   id: string;
   name: string;
@@ -169,31 +162,47 @@ function formatUnknownError(nextError: unknown): string {
   return String(nextError);
 }
 
+// The host fails an action call after 30 s. The worker saves progress as it
+// goes, but until that abandoned call reaches its next host request it still
+// holds the company, so the next call can be refused as "already running".
+// Both clear by calling again a little later.
+const INITIALIZE_RETRY_DELAY_MS = 10_000;
+const INITIALIZE_MAX_RETRIES = 6;
+// Every call that returns done: false has moved on. Stop if several in a row
+// report the same progress.
+const INITIALIZE_MAX_CALLS_WITHOUT_PROGRESS = 3;
+
+function isRetryableInitializeError(nextError: unknown): boolean {
+  const code = nextError && typeof nextError === "object" && "code" in nextError ? nextError.code : undefined;
+  return code === "TIMEOUT" || formatUnknownError(nextError).includes("already running");
+}
+
 function validateSettingsBeforePersist(config: SettingsConfig) {
   if (getDeploymentMode(config) === "self-hosted" && !config.honchoApiBaseUrl.trim()) {
     throw new Error("Honcho API base URL is required for self-hosted or local deployments.");
   }
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function useSettingsConfig() {
+// Plugin config is stored per company on current Paperclip hosts, and the
+// config routes reject a request that does not name the company.
+function useSettingsConfig(companyId: string | null) {
   const [configJson, setConfigJson] = useState<SettingsConfig>({ ...DEFAULT_CONFIG });
   const [loading, setLoading] = useState(true);
+  // Whether configJson holds this company's stored config. Until it does,
+  // saving would replace that config with defaults, so save() refuses.
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    hostFetchJson<{ configJson?: Record<string, unknown> | null } | null>(`/api/plugins/${PLUGIN_ID}/config`)
+    const query = companyId ? `?companyId=${encodeURIComponent(companyId)}` : "";
+    hostFetchJson<{ configJson?: Record<string, unknown> | null } | null>(`/api/plugins/${PLUGIN_ID}/config${query}`)
       .then((result) => {
         if (cancelled) return;
         setConfigJson(normalizeSettingsConfig(result?.configJson));
+        setLoaded(true);
         setError(null);
       })
       .catch((nextError) => {
@@ -207,17 +216,21 @@ function useSettingsConfig() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [companyId]);
 
   async function save(nextConfig: SettingsConfig) {
+    if (!loaded) {
+      throw new Error("Honcho settings for this company did not load. Reload the page before saving.");
+    }
     validateSettingsBeforePersist(nextConfig);
     setSaving(true);
     try {
       await hostFetchJson(`/api/plugins/${PLUGIN_ID}/config`, {
         method: "POST",
-        body: JSON.stringify({ configJson: nextConfig }),
+        body: JSON.stringify({ companyId: companyId ?? undefined, configJson: nextConfig }),
       });
-      setConfigJson(nextConfig);
+      // Keep configJson: the user may have edited it while the request ran,
+      // and autosave saves that edit next.
       setError(null);
     } catch (nextError) {
       setError(formatUnknownError(nextError));
@@ -230,7 +243,7 @@ function useSettingsConfig() {
   async function test(nextConfig: SettingsConfig) {
     return await hostFetchJson<{ valid: boolean; message?: string }>(`/api/plugins/${PLUGIN_ID}/config/test`, {
       method: "POST",
-      body: JSON.stringify({ configJson: nextConfig }),
+      body: JSON.stringify({ companyId: companyId ?? undefined, configJson: nextConfig }),
     });
   }
 
@@ -243,45 +256,6 @@ function useSettingsConfig() {
     save,
     test,
   };
-}
-
-function usePluginJobs() {
-  const [jobs, setJobs] = useState<PluginJobRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const result = await hostFetchJson<PluginJobRecord[]>(`/api/plugins/${PLUGIN_ID}/jobs`);
-      setJobs(result);
-      setError(null);
-    } catch (nextError) {
-      setError(formatUnknownError(nextError));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  async function triggerByKey(jobKey: string) {
-    const job = jobs.find((entry) => entry.jobKey === jobKey);
-    if (!job) {
-      await refresh();
-    }
-    const resolved = jobs.find((entry) => entry.jobKey === jobKey);
-    if (!resolved) throw new Error(`Job not found: ${jobKey}`);
-    await hostFetchJson(`/api/plugins/${PLUGIN_ID}/jobs/${resolved.id}/trigger`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    await refresh();
-  }
-
-  return { jobs, loading, error, refresh, triggerByKey };
 }
 
 function useCompanies() {
@@ -442,8 +416,8 @@ function SecretSection(props: {
         />
         <span style={{ color: "#475569", fontSize: "0.82rem" }}>
           Stored as plain plugin config, not a Paperclip secret reference (that system is currently disabled
-          platform-wide). If you'd rather not put the key here, leave this blank and set a{" "}
-          <code>HONCHO_API_KEY</code> environment variable on the plugin worker process instead.
+          platform-wide). If you'd rather not put the key here, leave this blank to use the key in{" "}
+          <code>~/.honcho/config.json</code> on the machine running Paperclip, shared by every company without a key.
         </span>
       </label>
     </div>
@@ -550,8 +524,17 @@ function StatsGrid({ status }: { status: MemoryStatusData | null }) {
 export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const companies = useCompanies();
   const companyId = context.companyId ?? companies[0]?.id ?? null;
-  const settings = useSettingsConfig();
-  const jobs = usePluginJobs();
+  // Config is stored per company, and the host keeps this page mounted when
+  // the selected company changes. Remount per company so loaded config, edits
+  // and the autosave baseline never carry over into another company.
+  return <CompanySettingsPage key={companyId ?? ""} context={context} companies={companies} companyId={companyId} />;
+}
+
+function CompanySettingsPage({ context, companies, companyId }: PluginSettingsPageProps & {
+  companies: CompanyRecord[];
+  companyId: string | null;
+}) {
+  const settings = useSettingsConfig(companyId);
   const memoryStatus = usePluginData<MemoryStatusData>(DATA_KEYS.memoryStatus, companyId ? { companyId } : {});
   const preview = usePluginData<MigrationPreview | null>(DATA_KEYS.migrationPreview, companyId ? { companyId } : {});
   const jobStatus = usePluginData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, companyId ? { companyId } : {});
@@ -563,6 +546,15 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const [activationStepIndex, setActivationStepIndex] = useState<number | null>(null);
   const [activationStepLabel, setActivationStepLabel] = useState<string | null>(null);
   const lastPersistedConfigRef = useRef<string | null>(null);
+  // The initialize loop checks this between calls, so it stops when the page
+  // unmounts, for example when the user switches company.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const status = memoryStatus.data;
   const companyStatus = status?.companyStatus;
@@ -574,7 +566,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
   const canRunConnectionActions = deploymentMode === "cloud"
     ? Boolean(companyId)
     : Boolean(companyId && settings.configJson.honchoApiBaseUrl.trim());
-  const actionButtonsDisabled = settings.loading || settings.saving || jobs.loading || isActivating;
+  const actionButtonsDisabled = settings.loading || settings.saving || isActivating;
 
   function refreshActivationData() {
     memoryStatus.refresh();
@@ -615,18 +607,6 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     };
   }, [isActivating, settings.configJson, settings.loading, settings.saving]);
 
-  async function getCheckpointStatus() {
-    if (!companyId) return null;
-    const result = await hostFetchJson<{ data: MigrationJobStatusData }>(`/api/plugins/${PLUGIN_ID}/data/${DATA_KEYS.migrationJobStatus}`, {
-      method: "POST",
-      body: JSON.stringify({
-        companyId,
-        params: { companyId },
-      }),
-    });
-    return result.data.checkpoint;
-  }
-
   async function saveSettings() {
     setError(null);
     setNotice(null);
@@ -650,27 +630,38 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
     }
   }
 
-  async function triggerJob(jobKey: string) {
-    if (jobKey === JOB_KEYS.initializeMemory) {
-      if (!companyId) {
-        throw new Error("companyId is required");
-      }
-      await initializeMemoryForCompany({ companyId });
+  // The initialize action stops before the host's action timeout and returns
+  // done: false while work is left, so call it until it is done.
+  async function initializeMemory() {
+    if (!companyId) {
+      throw new Error("companyId is required");
     }
-    await jobs.triggerByKey(jobKey);
-    const timeoutAt = Date.now() + DEFAULT_JOB_WAIT_TIMEOUT_MS;
-    while (Date.now() < timeoutAt) {
-      const checkpoint = await getCheckpointStatus();
-      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "failed") {
-        throw new Error(checkpoint.lastError ?? `Job failed: ${jobKey}`);
+    let lastProgress: unknown;
+    let callsWithoutProgress = 0;
+    let retries = 0;
+    while (mountedRef.current) {
+      let result: { done?: boolean; progress?: unknown } | null;
+      try {
+        result = await initializeMemoryForCompany({ companyId }) as { done?: boolean; progress?: unknown } | null;
+      } catch (nextError) {
+        if (!isRetryableInitializeError(nextError) || retries >= INITIALIZE_MAX_RETRIES) throw nextError;
+        retries += 1;
+        await new Promise((resolve) => window.setTimeout(resolve, INITIALIZE_RETRY_DELAY_MS));
+        continue;
       }
-      if (checkpoint?.activeJobKey === jobKey && checkpoint.status === "complete") {
-        refreshActivationData();
-        return;
+      retries = 0;
+      refreshActivationData();
+      if (result?.done !== false) return;
+      if (result.progress === lastProgress) {
+        callsWithoutProgress += 1;
+        if (callsWithoutProgress >= INITIALIZE_MAX_CALLS_WITHOUT_PROGRESS) {
+          throw new Error("Memory initialization stopped making progress.");
+        }
+      } else {
+        callsWithoutProgress = 0;
+        lastProgress = result.progress;
       }
-      await sleep(1_000);
     }
-    throw new Error(`Timed out waiting for ${jobKey} to complete.`);
   }
 
   async function runActivation() {
@@ -680,22 +671,26 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
         errorLabel: "validating config",
         run: async () => {
           await validateCurrentSettings();
-          await settings.save(settings.configJson);
-          markConfigPersisted(settings.configJson);
+          // Saving config needs an instance admin. Skip an unchanged save so a
+          // company member can initialize with the stored config.
+          if (JSON.stringify(settings.configJson) !== lastPersistedConfigRef.current) {
+            await settings.save(settings.configJson);
+            markConfigPersisted(settings.configJson);
+          }
         },
       },
       {
         label: "Testing connection",
         errorLabel: "testing connection",
         run: async () => {
-          await testConnection({});
+          await testConnection({ companyId });
         },
       },
       {
         label: "Initializing memory",
         errorLabel: "initializing memory",
         run: async () => {
-          await triggerJob(JOB_KEYS.initializeMemory);
+          await initializeMemory();
         },
       },
     ];
@@ -815,7 +810,7 @@ export function HonchoSettingsPage({ context }: PluginSettingsPageProps) {
           <div style={{ color: "#475569" }}>{`Step ${activationStepIndex + 1} of 3: ${activationStepLabel}`}</div>
         ) : null}
         {notice ? <div style={{ color: "#0f766e" }}>{notice}</div> : null}
-        {error || settings.error || jobs.error ? <div style={{ color: "#b91c1c" }}>{error ?? settings.error ?? jobs.error}</div> : null}
+        {error || settings.error ? <div style={{ color: "#b91c1c" }}>{error ?? settings.error}</div> : null}
       </div>
     </div>
   );
