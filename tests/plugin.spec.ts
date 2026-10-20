@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ACTION_KEYS } from "../src/constants.js";
 import { peerIdForAgent } from "../src/ids.js";
 import plugin from "../src/worker.js";
 import { createHonchoHarness, installFetchMock } from "./helpers.js";
@@ -65,7 +66,7 @@ describe("@honcho-ai/paperclip-honcho smoke", () => {
     expect(status.issueId).toBe("iss_1");
 
     await harness.performAction("resync-issue", { issueId: "iss_1", companyId: "co_1" });
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
     const connection = await harness.performAction<Record<string, unknown>>("test-connection");
     expect(connection.ok).toBe(true);
 

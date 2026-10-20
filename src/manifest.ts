@@ -127,7 +127,7 @@ const manifest: PaperclipPluginManifestV1 = {
     {
       jobKey: JOB_KEYS.initializeMemory,
       displayName: "Initialize Memory",
-      description: "Connects Honcho, creates core mappings, imports baseline issue memory, and verifies manual prompt previews.",
+      description: "Finishes an initialization queued by plugin 0.1.3 or earlier. To initialize a company, use Initialize Honcho memory on the settings page.",
     },
   ],
   tools: [

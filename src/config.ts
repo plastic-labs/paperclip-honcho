@@ -58,8 +58,21 @@ export function resolveConfig(config: HonchoPluginConfig | Record<string, unknow
   };
 }
 
-export async function getResolvedConfig(ctx: PluginContext): Promise<HonchoResolvedConfig> {
-  return resolveConfig((await ctx.config.get()) as HonchoPluginConfig);
+/**
+ * Resolve the operator config for a company.
+ *
+ * Since Paperclip 2026.9 plugin config is company-scoped: `ctx.config.get()`
+ * without a company only works inside a host invocation that carries one, and
+ * throws "company context is required" during `setup()` and jobs. Pass the
+ * `companyId` of the company being acted on whenever it is known.
+ *
+ * There is deliberately no fallback to some other company when the host
+ * refuses: each company can point at its own Honcho key and base URL, so
+ * borrowing another company's config could send one company's data to a
+ * different Honcho workspace or tenant. The error propagates instead.
+ */
+export async function getResolvedConfig(ctx: PluginContext, companyId?: string): Promise<HonchoResolvedConfig> {
+  return resolveConfig((await ctx.config.get(companyId)) as HonchoPluginConfig);
 }
 
 export function validateConfig(config: HonchoPluginConfig | Record<string, unknown> | HonchoResolvedConfig): PluginConfigValidationResult {

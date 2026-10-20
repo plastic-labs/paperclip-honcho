@@ -6,6 +6,7 @@ import { buildDefaultFixtures, createHonchoHarness, installFetchMock, requestsMa
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("honcho sync", () => {
@@ -28,6 +29,40 @@ describe("honcho sync", () => {
 
     expect(requestsMatching(requests, "/sessions").length).toBeGreaterThan(0);
     expect(requestsMatching(requests, "/messages")).toHaveLength(0);
+  });
+
+  // Events arrive for every company. One that never configured the plugin has
+  // no API key for Honcho cloud, and must not send Honcho requests without one.
+  it("skips event syncs for a company whose config has no Honcho API key", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness({ config: { honchoApiKey: "" } });
+
+    await plugin.definition.setup(harness.ctx);
+    const scope = { entityId: "iss_1", entityType: "issue" as const, companyId: "co_1" };
+    await harness.emit("issue.created", {}, scope);
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, scope);
+    await harness.emit("issue.updated", { key: "design" }, scope);
+
+    expect(requests).toHaveLength(0);
+    const status = await harness.getData<{ companyStatus: { lastError: unknown } }>("memory-status", { companyId: "co_1" });
+    expect(status.companyStatus.lastError).toBeNull();
+  });
+
+  // With no settings of its own a company resolves to the defaults, which a key
+  // that every company on the worker's machine shares can make valid. It has
+  // not opted in until it saves settings or initializes.
+  it("skips event syncs for a company with no stored config even when a shared key exists", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+    harness.ctx.config.get = async () => ({});
+    vi.stubEnv("HONCHO_API_KEY", "shared-key");
+
+    await plugin.definition.setup(harness.ctx);
+    const scope = { entityId: "iss_1", entityType: "issue" as const, companyId: "co_1" };
+    await harness.emit("issue.created", {}, scope);
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, scope);
+
+    expect(requests).toHaveLength(0);
   });
 
   it("syncs only unsynced comments, dedupes replayed events, and includes provenance", async () => {

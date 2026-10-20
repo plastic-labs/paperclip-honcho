@@ -22,6 +22,7 @@ import { HonchoSettingsPage } from "../src/ui/index.js";
 type FetchStubOptions = {
   configTestResponse?: Response | (() => Response | Promise<Response>);
   configJsonOverrides?: Record<string, unknown>;
+  failConfigLoadFor?: string;
   migrationJobStatusResponses?: Array<Record<string, unknown> | null>;
   onJobTrigger?: (url: string) => void;
 };
@@ -47,9 +48,12 @@ function installFetchStub(options: FetchStubOptions = {}) {
       }
       return new Response(JSON.stringify([{ id: "secret_1", name: "HONCHO_API_KEY", description: null }]), { status: 200 });
     }
-    if (url.endsWith("/config")) {
+    if (url.split("?", 1)[0]!.endsWith("/config")) {
       if ((init?.method ?? "GET") === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (options.failConfigLoadFor && url.endsWith(`?companyId=${options.failConfigLoadFor}`)) {
+        return new Response("config unavailable", { status: 500 });
       }
       return new Response(JSON.stringify({
         configJson: {
@@ -303,7 +307,10 @@ describe("HonchoSettingsPage", () => {
 
   it("runs activation steps in order and reports progress", async () => {
     const triggeredJobs: string[] = [];
-    const initializeAction = vi.fn(async () => ({ ok: true }));
+    // The first call runs out of time; the page calls again until done.
+    const initializeAction = vi.fn()
+      .mockResolvedValueOnce({ ok: true, done: false })
+      .mockResolvedValueOnce({ ok: true, done: true });
     let resolveValidation: () => void = () => {
       throw new Error("Validation resolver was not initialized");
     };
@@ -344,153 +351,9 @@ describe("HonchoSettingsPage", () => {
 
     expect(configTestIndex).toBeGreaterThan(-1);
     expect(initializeIndex).toBeGreaterThan(0);
-    expect(triggeredJobs).toEqual([
-      "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
-    ]);
-    expect(initializeAction).toHaveBeenCalledWith({ companyId: "co_1" });
-  });
-
-  it("waits for each triggered job to complete before starting the next one", async () => {
-    const triggeredJobs: string[] = [];
-    installFetchStub({
-      migrationJobStatusResponses: [
-        { activeJobKey: "initialize-memory", status: "running", processed: 0, succeeded: 0, skipped: 0, failed: 0, currentSourceType: null, currentEntityId: null, lastError: null, updatedAt: "2026-04-09T21:39:00.000Z" },
-        { activeJobKey: "initialize-memory", status: "complete", processed: 0, succeeded: 0, skipped: 0, failed: 0, currentSourceType: null, currentEntityId: null, lastError: null, updatedAt: "2026-04-09T21:39:01.000Z" },
-      ],
-      onJobTrigger: (url) => {
-        triggeredJobs.push(url);
-      },
-    });
-
-    render(<HonchoSettingsPage context={testContext} />);
-
-    await waitForActionButtonsReady();
-
-    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Honcho activation completed.")).toBeTruthy();
-    }, { timeout: 3_000 });
-
-    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    const initializeTriggerIndex = requestUrls.findIndex((url) => url.includes("/jobs/job_init/trigger"));
-    const initializeStatusCompleteIndex = requestUrls.findIndex((url, index) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`) && index > initializeTriggerIndex);
-
-    expect(initializeTriggerIndex).toBeGreaterThan(-1);
-    expect(initializeStatusCompleteIndex).toBeGreaterThan(initializeTriggerIndex);
-    expect(triggeredJobs).toEqual([
-      "/api/plugins/honcho-ai.paperclip-honcho/jobs/job_init/trigger",
-    ]);
-  });
-
-  it("keeps polling long-running initialization jobs without timing out after 15 seconds", async () => {
-    installFetchStub({
-      migrationJobStatusResponses: [
-        ...Array.from({ length: 20 }, (_, index) => ({
-          activeJobKey: "initialize-memory",
-          status: "running",
-          processed: index,
-          succeeded: index,
-          skipped: 0,
-          failed: 0,
-          currentSourceType: null,
-          currentEntityId: null,
-          lastError: null,
-          updatedAt: `2026-04-09T21:39:${String(index).padStart(2, "0")}.000Z`,
-        })),
-        {
-          activeJobKey: "initialize-memory",
-          status: "complete",
-          processed: 20,
-          succeeded: 20,
-          skipped: 0,
-          failed: 0,
-          currentSourceType: null,
-          currentEntityId: null,
-          lastError: null,
-          updatedAt: "2026-04-09T21:42:20.000Z",
-        },
-      ],
-    });
-
-    render(<HonchoSettingsPage context={testContext} />);
-
-    await waitForActionButtonsReady();
-
-    vi.useFakeTimers();
-    let nowMs = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => {
-      const current = nowMs;
-      nowMs += 1_000;
-      return current;
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
-
-    await vi.runAllTimersAsync();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    const statusPolls = requestUrls.filter((url) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`));
-    expect(statusPolls.length).toBeGreaterThanOrEqual(20);
-    expect(screen.queryByText(/Activation failed during/)).toBeNull();
-    expect(screen.queryByText(/Timed out waiting for initialize-memory to complete\./)).toBeNull();
-  });
-
-  it("allows initialization polling to continue past five minutes before timing out", async () => {
-    installFetchStub({
-      migrationJobStatusResponses: [
-        ...Array.from({ length: 10 }, (_, index) => ({
-          activeJobKey: "initialize-memory",
-          status: "running",
-          processed: index,
-          succeeded: index,
-          skipped: 0,
-          failed: 0,
-          currentSourceType: null,
-          currentEntityId: null,
-          lastError: null,
-          updatedAt: `2026-04-09T21:${String(39 + index).padStart(2, "0")}:00.000Z`,
-        })),
-        {
-          activeJobKey: "initialize-memory",
-          status: "complete",
-          processed: 10,
-          succeeded: 10,
-          skipped: 0,
-          failed: 0,
-          currentSourceType: null,
-          currentEntityId: null,
-          lastError: null,
-          updatedAt: "2026-04-09T21:49:00.000Z",
-        },
-      ],
-    });
-
-    render(<HonchoSettingsPage context={testContext} />);
-
-    await waitForActionButtonsReady();
-
-    vi.useFakeTimers();
-    let nowMs = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => {
-      const current = nowMs;
-      nowMs += 60_000;
-      return current;
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Initialize Honcho memory" }));
-
-    await vi.runAllTimersAsync();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const requestUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    const statusPolls = requestUrls.filter((url) => url.includes(`/data/${DATA_KEYS.migrationJobStatus}`));
-    expect(statusPolls.length).toBeGreaterThanOrEqual(10);
-    expect(screen.queryByText(/Timed out waiting for initialize-memory to complete\./)).toBeNull();
-    expect(screen.queryByText(/Activation failed during/)).toBeNull();
+    // The action does the work. The job trigger route is instance-admin only.
+    expect(triggeredJobs).toEqual([]);
+    expect(initializeAction.mock.calls).toEqual([[{ companyId: "co_1" }], [{ companyId: "co_1" }]]);
   });
 
   it("stops activation on the first failure and shows the step-specific error", async () => {
@@ -530,6 +393,24 @@ describe("HonchoSettingsPage", () => {
       expect(screen.getByText("Activation failed during validating config: validation failed")).toBeTruthy();
     });
     expect(screen.queryByText("[object Object]")).toBeNull();
+  });
+
+  it("never saves one company's settings into another after a company switch", async () => {
+    installFetchStub({ failConfigLoadFor: "co_2" });
+    const { rerender } = render(<HonchoSettingsPage context={testContext} />);
+    await waitForActionButtonsReady();
+
+    // The host keeps the page mounted and only changes the selected company.
+    rerender(<HonchoSettingsPage context={{ ...testContext, companyId: "co_2" }} />);
+    await waitFor(() => expect(screen.getByText("config unavailable")).toBeTruthy());
+    await waitForActionButtonsReady();
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    await waitFor(() => expect(screen.getByText(/did not load/)).toBeTruthy());
+
+    const configPosts = vi.mocked(fetch).mock.calls.filter(([input, init]) => {
+      return String(input).endsWith("/config") && (init?.method ?? "GET") === "POST";
+    });
+    expect(configPosts).toHaveLength(0);
   });
 
   it("hides the base URL placeholder and marks the API key as optional for self-hosted deployments", async () => {
@@ -658,7 +539,9 @@ describe("HonchoSettingsPage", () => {
     const saveCall = fetchCalls.find(([input, init]) => String(input).endsWith("/config") && (init?.method ?? "GET") === "POST");
     expect(saveCall).toBeTruthy();
 
-    const body = JSON.parse(String(saveCall?.[1]?.body)) as { configJson: Record<string, unknown> };
+    const body = JSON.parse(String(saveCall?.[1]?.body)) as { companyId?: string; configJson: Record<string, unknown> };
+    expect(body.companyId).toBe("co_1");
+    expect(fetchCalls.map(([input]) => String(input))).toContain("/api/plugins/honcho-ai.paperclip-honcho/config?companyId=co_1");
     expect(body.configJson.honchoApiKey).toBe("secret_1");
     expect(body.configJson.observe_me).toBe(true);
     expect(body.configJson.observe_others).toBe(true);

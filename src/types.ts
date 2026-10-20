@@ -361,6 +361,9 @@ export type MigrationSourceCandidate = {
   workspaceId?: string | null;
   projectId?: string | null;
   sourceCategory?: LegacyFileCategory | null;
+  // Issue documents: the revision the issue's sync cursor held for this
+  // document when the candidate was collected.
+  documentCursorAtCollection?: string | null;
 };
 
 export type NormalizedMessage = {
@@ -421,6 +424,8 @@ export type SyncIssueResult = {
 
 export type RepairMappingsResult = {
   repaired: number;
+  // False when the deadline passed before every agent and issue was mapped.
+  done: boolean;
 };
 
 export type SyncableIssueResource = {

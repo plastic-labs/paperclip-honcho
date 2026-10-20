@@ -2,6 +2,31 @@
 
 All notable changes to `@honcho-ai/paperclip-honcho` will be documented in this file.
 
+## [0.1.4] - 2026-10-20
+
+### Fixed
+- Installs and activates on current Paperclip hosts, where plugin config is stored per company. Setup no longer fails with "company context is required" (#22, #18).
+- **Initialize Honcho memory** completes on current hosts. It runs in the settings page action for the selected company instead of in the `initialize-memory` job (#20).
+- Initialization works in calls of about 20 seconds, inside the host's 30-second action timeout. The worker keeps what each call read and imported, so the next call goes on where the last one stopped, and the settings page keeps calling while calls make progress. It retries a call the host timed out and stops when the page closes. Between calls the status shows initialization as partial, or as running after a call the host timed out until the next call starts.
+- Each host request runs once. Fixes duplicate-key errors and "received response for unknown request id" during initialization (#19).
+- Initialization maps every agent and issue to Honcho, not only the first 100 (#20).
+- Two **Initialize Honcho memory** runs for one company, for example from two tabs, no longer overlap and import every message twice.
+- Comments and documents imported by a call the host timed out are not appended again by the next issue sync. The item that call was importing is imported by the next call instead of being lost.
+- Initialization reports items it could not import: the migration shows as partial with the first error, where it used to show complete. Running it again imports them. A comment that failed used to be skipped for good once a later comment on its issue was imported.
+- A document that an issue event syncs while initialization is running is left to that sync. Initialization used to append the older revision it had read, and the next issue sync appended the newer one again.
+- Initialization no longer stops with "Issue not found" on every call when an issue is deleted or made private while it runs.
+- Issue events for a company whose config cannot reach Honcho, such as Honcho cloud with no API key, are skipped. They used to send Honcho unauthenticated requests and record the failures. Any URL on the Honcho cloud host, such as `http://api.honcho.dev`, now needs an API key too.
+- The settings page loads, saves and validates the selected company's config on current hosts, and its connection check uses that company's config and workspace. It no longer saves when the company's config failed to load, and keeps edits typed while an autosave is in progress.
+- `honcho_ask_peer` stays available to a company with peer chat on when another company turns it off (#18).
+- Paperclip shows the plugin as 0.1.4. The 0.1.3 package reported 0.1.2.
+
+### Changed
+- Config is read for the company being acted on. With no company in scope the plugin fails instead of reading another company's plugin settings. A company with no API key of its own still falls back to the key in `~/.honcho/config.json` on the machine running Paperclip, which every such company shares. The settings page no longer suggests `HONCHO_API_KEY`, which Paperclip does not pass to plugin workers.
+- A company with no saved settings syncs issue events only once it has connected to Honcho, for example through **Initialize Honcho memory**. Before, every company synced through a key in `~/.honcho/config.json` as soon as one existed.
+- The settings page no longer triggers the `initialize-memory` job and does not re-save unchanged settings, so company members who are not instance admins can initialize with the stored settings. Changing settings still needs an instance admin. Running that job by hand only finishes a company queued by 0.1.3 or earlier.
+- Initialization skips agents and issues that already have a Honcho peer or session. Normal syncs still refresh their metadata.
+- Requires `@paperclipai/plugin-sdk` `^2026.1012.0`, which sends the company with each config read.
+
 ## [0.1.3] - 2026-07-09
 
 ### Added

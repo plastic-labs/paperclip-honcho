@@ -1,8 +1,11 @@
+import { PLUGIN_RPC_ERROR_CODES } from "@paperclipai/plugin-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ACTION_KEYS, DATA_KEYS, ENTITY_TYPES, JOB_KEYS } from "../src/constants.js";
 import { peerIdForAgent, workspaceIdForCompany } from "../src/ids.js";
-import { importMigrationPreview, scanMigrationSources, setMigrationCandidatesLoaderForTests } from "../src/sync.js";
+import { importMigrationPreview, initializeMemory, scanMigrationSources, setMigrationCandidatesLoaderForTests } from "../src/sync.js";
+import type { InitializationReport, MemoryStatusData, MigrationJobStatusData } from "../src/types.js";
 import plugin from "../src/worker.js";
-import { createHonchoHarness, installFetchMock, requestsMatching } from "./helpers.js";
+import { buildDefaultFixtures, createHonchoHarness, installFetchMock, requestsMatching, type CapturedRequest } from "./helpers.js";
 
 afterEach(() => {
   setMigrationCandidatesLoaderForTests(null);
@@ -12,13 +15,19 @@ afterEach(() => {
 const companyWorkspaceId = workspaceIdForCompany("co_1", "paperclip", "Paperclip");
 const firstAgentPeerId = peerIdForAgent("agent_1", "Agent One");
 
+function appendedMessageCount(requests: CapturedRequest[]): number {
+  return requestsMatching(requests, "/messages")
+    .filter((request) => Array.isArray(request.body?.messages))
+    .reduce((total, request) => total + (request.body!.messages as unknown[]).length, 0);
+}
+
 describe("honcho memory jobs", () => {
   it("initialize-memory creates company memory state, mappings, and an initialization report", async () => {
     installFetchMock();
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -70,7 +79,7 @@ describe("honcho memory jobs", () => {
 
     await plugin.definition.setup(harness.ctx);
 
-    await expect(harness.runJob("initialize-memory")).rejects.toThrow("Honcho API key is required");
+    await expect(harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" })).rejects.toThrow("Honcho API key is required");
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -128,7 +137,7 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -153,7 +162,7 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const status = await harness.getData<Record<string, unknown>>("memory-status", {
       companyId: "co_1",
@@ -307,7 +316,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.body).toMatchObject({
@@ -342,7 +351,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const workspaceRequests = requestsMatching(requests, "/v3/workspaces");
     expect(workspaceRequests.length).toBeGreaterThanOrEqual(2);
@@ -429,7 +438,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const workspaceRequest = requestsMatching(requests, "/v3/workspaces")[0];
     expect(workspaceRequest?.body).toMatchObject({
@@ -451,7 +460,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const renamedAgentPeerId = peerIdForAgent("agent_1", "Renamed Agent");
     expect(renamedAgentPeerId).not.toBe(firstAgentPeerId);
@@ -463,7 +472,7 @@ describe("honcho memory jobs", () => {
       }],
     });
 
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     expect(requestsMatching(requests, "/peers").some((request) => request.body?.id === renamedAgentPeerId)).toBe(false);
     const peerMappings = await harness.ctx.entities.list({
@@ -574,7 +583,7 @@ describe("honcho memory jobs", () => {
     const harness = createHonchoHarness();
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     await harness.ctx.entities.upsert({
       entityType: "honcho-workspace-mapping",
@@ -607,7 +616,7 @@ describe("honcho memory jobs", () => {
       },
     });
 
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",
@@ -655,7 +664,7 @@ describe("honcho memory jobs", () => {
     });
 
     await plugin.definition.setup(harness.ctx);
-    await harness.runJob("initialize-memory");
+    await harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" });
 
     const workspaceMappings = await harness.ctx.entities.list({
       entityType: "honcho-workspace-mapping",
@@ -679,5 +688,235 @@ describe("honcho memory jobs", () => {
       initializationStatus: "complete",
       lastError: null,
     });
+  });
+
+  // #20: Paperclip admits company-scoped worker->host calls only inside an
+  // invocation that carries the company. performAction and getData carry one;
+  // runJob carries none, so initialization that waited for the job never ran.
+  it("initializes memory inside the action, which the host scopes to the company", async () => {
+    installFetchMock();
+    // One more agent and issue than a host page holds, so mapping has to paginate.
+    const agents = Array.from({ length: 101 }, (_, index) => ({
+      ...buildDefaultFixtures().agents[0]!,
+      id: `agent_${index + 1}`,
+      name: `Agent ${index + 1}`,
+      urlKey: `agent-${index + 1}`,
+    }));
+    const issues = Array.from({ length: 101 }, (_, index) => ({
+      ...buildDefaultFixtures().issues[0]!,
+      id: `iss_${index + 1}`,
+      identifier: `PAP-${index + 1}`,
+    }));
+    const harness = createHonchoHarness({ seed: { agents, issues } });
+    // Like current hosts: issues.list applies limit/offset in SQL and then the
+    // same window again to the returned rows, so an offset > 0 comes back empty.
+    const listIssues = harness.ctx.issues.list.bind(harness.ctx.issues);
+    harness.ctx.issues.list = async (input) => {
+      const offset = input.offset ?? 0;
+      return (await listIssues(input)).slice(offset, input.limit === undefined ? undefined : offset + input.limit);
+    };
+    let scopedCompanyId: string | null = null;
+    const getConfig = harness.ctx.config.get.bind(harness.ctx.config);
+    harness.ctx.config.get = async (companyId?: string) => {
+      if (!scopedCompanyId) {
+        throw new Error('Plugin "honcho" is not allowed to perform "config.get": company context is required');
+      }
+      return await getConfig(companyId);
+    };
+    const asCompany = async <T>(work: () => Promise<T>): Promise<T> => {
+      scopedCompanyId = "co_1";
+      try {
+        return await work();
+      } finally {
+        scopedCompanyId = null;
+      }
+    };
+
+    await plugin.definition.setup(harness.ctx);
+    await asCompany(() => harness.performAction(ACTION_KEYS.initializeMemoryForCompany, {}, { companyId: "co_1" }));
+    // The settings page still triggers the job afterwards; with nothing queued it does nothing.
+    await expect(harness.runJob(JOB_KEYS.initializeMemory)).resolves.toBeUndefined();
+
+    // What the settings page polls and shows once activation finishes.
+    const jobStatus = await asCompany(() => harness.getData<MigrationJobStatusData>(DATA_KEYS.migrationJobStatus, { companyId: "co_1" }));
+    expect(jobStatus.checkpoint).toMatchObject({ activeJobKey: JOB_KEYS.initializeMemory, status: "complete" });
+    const status = await asCompany(() => harness.getData<MemoryStatusData>(DATA_KEYS.memoryStatus, { companyId: "co_1" }));
+    expect(status.companyStatus).toMatchObject({ initializationStatus: "complete", migrationStatus: "complete" });
+    const agentPeerMappings = (await harness.ctx.entities.list({ entityType: ENTITY_TYPES.peerMapping, limit: 1000 }))
+      .filter((record) => record.externalId?.startsWith("paperclip:agent:"));
+    expect(agentPeerMappings).toHaveLength(101);
+    expect(await harness.ctx.entities.list({ entityType: ENTITY_TYPES.sessionMapping, limit: 1000 })).toHaveLength(101);
+  });
+
+  // The host fails an action after 30 s, so initialization stops at a deadline
+  // and the settings page calls it again. Each call must pick up where the
+  // last one stopped, and nothing may be imported twice.
+  it("resumes an initialization that stopped at its deadline without importing anything twice", async () => {
+    const { requests } = installFetchMock();
+    // The document's latest revision predates the comments, so once it is
+    // imported it sits ahead of the work that is left.
+    const documentRevisions = buildDefaultFixtures().documentRevisions.map((revision) =>
+      revision.id === "rev_2" ? { ...revision, createdAt: new Date("2026-03-15T12:00:30.000Z") } : revision);
+    const harness = createHonchoHarness({ seed: { documentRevisions } });
+    let commentReads = 0;
+    const listComments = harness.ctx.issues.listComments.bind(harness.ctx.issues);
+    harness.ctx.issues.listComments = async (...args) => {
+      commentReads += 1;
+      return await listComments(...args);
+    };
+    await plugin.definition.setup(harness.ctx);
+
+    // With the deadline already past, each call maps or imports one item and stops.
+    let calls = 0;
+    let report: InitializationReport | null = null;
+    while (!report && calls < 20) {
+      calls += 1;
+      ({ report } = await initializeMemory(harness.ctx, "co_1", { deadline: 0 }));
+    }
+
+    expect(calls).toBeGreaterThan(3);
+    // Later calls go on from where earlier ones stopped instead of re-reading the issue.
+    expect(commentReads).toBe(1);
+    const status = await harness.getData<MemoryStatusData>(DATA_KEYS.memoryStatus, { companyId: "co_1" });
+    expect(status.companyStatus).toMatchObject({ initializationStatus: "complete", migrationStatus: "complete" });
+    const imported = report!.importSummary.comments + report!.importSummary.documents;
+    expect(imported).toBeGreaterThan(2);
+    expect(appendedMessageCount(requests)).toBe(imported);
+  });
+
+  // When the host gives up on an action call it refuses the worker's remaining
+  // company-scoped calls for it. What the call already imported must still be
+  // recorded on the issue, or the next event sync appends it again.
+  it("records imported comments on the issue when the host gives up on the call", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+    await plugin.definition.setup(harness.ctx);
+    let hostGaveUp = false;
+    let appendsBeforeGivingUp = 1;
+    const fetch = harness.ctx.http.fetch.bind(harness.ctx.http);
+    harness.ctx.http.fetch = async (url, init) => {
+      const response = await fetch(url, init);
+      if (url.endsWith("/messages") && init?.method === "POST" && --appendsBeforeGivingUp === 0) hostGaveUp = true;
+      return response;
+    };
+    const state = harness.ctx.state;
+    for (const method of ["get", "set"] as const) {
+      const original = state[method].bind(state) as (...args: unknown[]) => Promise<unknown>;
+      (state as unknown as Record<string, unknown>)[method] = async (key: { scopeKind: string }, ...rest: unknown[]) => {
+        if (hostGaveUp && key.scopeKind === "company") throw new Error("unknown invocation scope");
+        return await original(key, ...rest);
+      };
+    }
+
+    await expect(initializeMemory(harness.ctx, "co_1", { deadline: Date.now() + 60_000 })).rejects.toThrow("unknown invocation scope");
+    hostGaveUp = false;
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, { entityId: "iss_1", entityType: "issue", companyId: "co_1" });
+
+    const appendedCommentIds = requestsMatching(requests, "/messages")
+      .flatMap((request) => (request.body?.messages as Array<{ metadata?: { commentId?: string } }> | undefined) ?? [])
+      .map((message) => message.metadata?.commentId)
+      .filter(Boolean);
+    expect(appendedCommentIds).toEqual(["c_1", "c_2"]);
+  });
+
+  // A comment whose import the host refused (it gave up on the call) or that
+  // Honcho failed must not be lost: later comments on its issue would move the
+  // issue's sync cursor past it, and nothing would import it again.
+  it("retries a comment the host refused or Honcho failed instead of losing it", async () => {
+    const { requests } = installFetchMock();
+    const issueComments = [1, 2, 3, 4].map((n) => ({
+      ...buildDefaultFixtures().issueComments[0]!,
+      id: `c_${n}`,
+      body: `Comment number ${n}`,
+      createdAt: new Date(`2026-03-15T12:0${n}:00.000Z`),
+      updatedAt: new Date(`2026-03-15T12:0${n}:00.000Z`),
+    }));
+    const harness = createHonchoHarness({ seed: { issueComments, issueDocuments: [], documentRevisions: [] } });
+    await plugin.definition.setup(harness.ctx);
+    let appends = 0;
+    let refuseCompanyRead = false;
+    const fetch = harness.ctx.http.fetch.bind(harness.ctx.http);
+    harness.ctx.http.fetch = async (url, init) => {
+      if (url.endsWith("/messages") && init?.method === "POST") {
+        appends += 1;
+        // The host gives up on the call right after c_1 is appended.
+        if (appends === 1) refuseCompanyRead = true;
+        // c_3 fails once.
+        if (appends === 3) return new Response(JSON.stringify({ error: "forced failure" }), { status: 500 });
+      }
+      return await fetch(url, init);
+    };
+    const getCompany = harness.ctx.companies.get.bind(harness.ctx.companies);
+    harness.ctx.companies.get = async (companyId) => {
+      if (refuseCompanyRead) {
+        refuseCompanyRead = false;
+        throw Object.assign(new Error("unknown invocation scope"), { code: PLUGIN_RPC_ERROR_CODES.INVOCATION_SCOPE_DENIED });
+      }
+      return await getCompany(companyId);
+    };
+    const migrationStatus = async () =>
+      (await harness.getData<MemoryStatusData>(DATA_KEYS.memoryStatus, { companyId: "co_1" })).companyStatus?.migrationStatus;
+
+    const deadline = () => Date.now() + 60_000;
+    expect((await initializeMemory(harness.ctx, "co_1", { deadline: deadline() })).report).toBeNull();
+    expect((await initializeMemory(harness.ctx, "co_1", { deadline: deadline() })).report?.importSummary.failed).toBe(2);
+    expect(await migrationStatus()).toBe("partial");
+    expect((await initializeMemory(harness.ctx, "co_1", { deadline: deadline() })).report?.importSummary.failed).toBe(0);
+    expect(await migrationStatus()).toBe("complete");
+
+    const appendedCommentIds = requestsMatching(requests, "/messages")
+      .flatMap((request) => (request.body?.messages as Array<{ metadata?: { commentId?: string } }> | undefined) ?? [])
+      .map((message) => message.metadata?.commentId);
+    expect(appendedCommentIds).toEqual(["c_1", "c_2", "c_3", "c_4"]);
+  });
+
+  // Initialization can take many calls. A document edited in between and synced
+  // by an issue event belongs to that sync: the import must not append the
+  // older revision it collected or move the issue's document cursor back to it.
+  it("leaves a document an issue event synced mid-initialization to that sync", async () => {
+    const { requests } = installFetchMock();
+    const documentRevisions = buildDefaultFixtures().documentRevisions;
+    const harness = createHonchoHarness({ seed: { documentRevisions } });
+    await plugin.definition.setup(harness.ctx);
+    const scope = { entityId: "iss_1", entityType: "issue" as const, companyId: "co_1" };
+
+    // With the deadline past, each call maps or imports one item, so the call
+    // that imports the first comment stops before the document.
+    for (let calls = 0; appendedMessageCount(requests) === 0 && calls < 10; calls += 1) {
+      await initializeMemory(harness.ctx, "co_1", { deadline: 0 });
+    }
+    documentRevisions.push({ ...documentRevisions[1]!, id: "rev_3", revisionNumber: 3, body: "# Design\n\nRevised chunk three.", createdAt: new Date("2026-03-15T12:04:00.000Z") });
+    await harness.emit("issue.comment.created", { commentId: "c_2" }, scope);
+    let report: InitializationReport | null = null;
+    for (let calls = 0; !report && calls < 10; calls += 1) {
+      ({ report } = await initializeMemory(harness.ctx, "co_1", { deadline: 0 }));
+    }
+    await harness.emit("issue.updated", {}, scope);
+
+    const appendedRevisionIds = requestsMatching(requests, "/messages")
+      .flatMap((request) => (request.body?.messages as Array<{ metadata?: { documentRevisionId?: string } }> | undefined) ?? [])
+      .map((message) => message.metadata?.documentRevisionId)
+      .filter(Boolean);
+    expect(report).not.toBeNull();
+    expect(appendedRevisionIds).toEqual(["rev_3"]);
+  });
+
+  it("refuses a second initialization for a company while one is running", async () => {
+    const { requests } = installFetchMock();
+    const harness = createHonchoHarness();
+    await plugin.definition.setup(harness.ctx);
+
+    const runs = await Promise.allSettled([
+      harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" }),
+      harness.performAction(ACTION_KEYS.initializeMemoryForCompany, { companyId: "co_1" }),
+    ]);
+
+    expect(runs.map((run) => run.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(runs.find((run) => run.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ message: expect.stringContaining("already running") }),
+    });
+    const ledger = await harness.ctx.entities.list({ entityType: ENTITY_TYPES.importLedger, limit: 1000 });
+    expect(ledger.length).toBeGreaterThan(0);
+    expect(appendedMessageCount(requests)).toBe(ledger.length);
   });
 });

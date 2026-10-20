@@ -134,7 +134,7 @@ describe("honcho tools", () => {
     expect(representationRequests[1]?.body).not.toHaveProperty("target");
   });
 
-  it("does not register honcho_ask_peer when peer chat is disabled", async () => {
+  it("refuses honcho_ask_peer for a company that has peer chat disabled", async () => {
     installFetchMock();
     const harness = createHonchoHarness({
       config: {
@@ -144,14 +144,14 @@ describe("honcho tools", () => {
 
     await plugin.definition.setup(harness.ctx);
 
-    await expect(
-      harness.executeTool("honcho_ask_peer", { targetPeerId: firstAgentPeerId, query: "Status?", issueId: "iss_1" }, {
-        companyId: "co_1",
-        projectId: "proj_1",
-        agentId: "agent_1",
-        runId: "run_1",
-      }),
-    ).rejects.toThrow("No tool handler registered");
+    const result = await harness.executeTool("honcho_ask_peer", { targetPeerId: firstAgentPeerId, query: "Status?", issueId: "iss_1" }, {
+      companyId: "co_1",
+      projectId: "proj_1",
+      agentId: "agent_1",
+      runId: "run_1",
+    });
+
+    expect(result.error).toBe("Honcho peer chat is disabled in plugin config");
   });
 
   it("registers and executes honcho_ask_peer when peer chat is enabled", async () => {

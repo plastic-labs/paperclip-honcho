@@ -9,6 +9,12 @@ export function normalizeBaseUrlForComparison(baseUrl: string): string {
   }
 }
 
+// By host, whatever the scheme, port or path, so that every spelling of the
+// cloud URL needs an API key.
 export function isHonchoCloudBaseUrl(baseUrl: string): boolean {
-  return normalizeBaseUrlForComparison(baseUrl) === normalizeBaseUrlForComparison(DEFAULT_CONFIG.honchoApiBaseUrl);
+  try {
+    return new URL(baseUrl.trim()).hostname === new URL(DEFAULT_CONFIG.honchoApiBaseUrl).hostname;
+  } catch {
+    return false;
+  }
 }

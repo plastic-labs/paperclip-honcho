@@ -1,7 +1,7 @@
 import type { PluginLauncherRegistration } from "@paperclipai/plugin-sdk";
 
 export const PLUGIN_ID = "honcho-ai.paperclip-honcho";
-export const PLUGIN_VERSION = "0.1.2";
+export const PLUGIN_VERSION = "0.1.4";
 export const STATE_NAMESPACE = "honcho";
 export const DEFAULT_WORKSPACE_PREFIX = "paperclip";
 export const HONCHO_V3_PATH = "/v3";
@@ -13,7 +13,10 @@ export const DEFAULT_DOCUMENT_SECTION_SIZE = 1800;
 export const DEFAULT_DOCUMENT_SECTION_OVERLAP = 200;
 export const DEFAULT_BACKFILL_BATCH_SIZE = 100;
 export const DEFAULT_MIN_IMPORT_TEXT_LENGTH = 12;
-export const DEFAULT_JOB_WAIT_TIMEOUT_MS = 15 * 60 * 1_000;
+// Paperclip fails an action after 30 s (DEFAULT_RPC_TIMEOUT_MS) and then
+// refuses the worker's remaining host calls for it. Initialization stops
+// starting new work after this long so it can save progress and return.
+export const INITIALIZE_ACTION_TIME_BUDGET_MS = 20_000;
 export const DEFAULT_SETTINGS_AUTOSAVE_DEBOUNCE_MS = 750;
 
 export const DEFAULT_NOISE_PATTERNS = [

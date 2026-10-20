@@ -21,4 +21,10 @@ describe("deployment helpers", () => {
   it("treats equivalent cloud URLs as cloud even when they include the default port or uppercase host casing", () => {
     expect(isHonchoCloudBaseUrl("HTTPS://API.HONCHO.DEV:443/")).toBe(true);
   });
+
+  it("treats any URL on the cloud host as cloud, so it needs an API key", () => {
+    expect(isHonchoCloudBaseUrl("http://api.honcho.dev")).toBe(true);
+    expect(isHonchoCloudBaseUrl("https://api.honcho.dev/v3")).toBe(true);
+    expect(isHonchoCloudBaseUrl("http://127.0.0.1:8001")).toBe(false);
+  });
 });
